@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -24,6 +26,20 @@ type TriggerRequest struct {
 
 func newServeMux(hub *Hub, sim *Simulator) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// GET /ping — real latency/error probe target
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		trigger := sim.GetTrigger()
+		if trigger.Latency {
+			time.Sleep(1800 * time.Millisecond)
+		}
+		if trigger.ErrorRate && rand.Float64() < 0.40 {
+			http.Error(w, "simulated error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
 
 	// Static files
 	mux.Handle("/", http.FileServer(http.Dir("static")))

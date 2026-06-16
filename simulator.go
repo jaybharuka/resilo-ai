@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
@@ -28,21 +30,29 @@ type TriggerMode struct {
 	ErrorRate bool
 }
 
-// Simulator collects real CPU/memory from the host and simulates latency/error-rate.
+const probeWindowSize = 10
+
+// Simulator collects real CPU/memory from the host and probes /ping for latency/error-rate.
 type Simulator struct {
 	mu      sync.RWMutex
 	current Metrics
 	trigger TriggerMode
 
-	// simulated base values for latency and error rate (drift over time)
-	latBase float64
-	errBase float64
+	// rolling probe window
+	probeLatency float64   // last measured RTT ms
+	probeErrors  [probeWindowSize]bool // ring buffer: true = error
+	probeIdx     int
+	probeFilled  bool
+
+	httpClient *http.Client
 }
 
 func newSimulator() *Simulator {
 	return &Simulator{
-		latBase: 300,
-		errBase: 2,
+		probeLatency: 0,
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
 	}
 }
 
@@ -52,12 +62,20 @@ func (s *Simulator) SetTrigger(t TriggerMode) {
 	s.trigger = t
 }
 
+func (s *Simulator) GetTrigger() TriggerMode {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.trigger
+}
+
 func (s *Simulator) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trigger = TriggerMode{}
-	s.latBase = 300
-	s.errBase = 2
+	s.probeLatency = 0
+	s.probeErrors = [probeWindowSize]bool{}
+	s.probeIdx = 0
+	s.probeFilled = false
 }
 
 func clamp(v, lo, hi float64) float64 {
@@ -89,6 +107,47 @@ func realMemory() float64 {
 	return v.UsedPercent
 }
 
+// probePing fires a GET /ping, records RTT and whether it was an error.
+// Runs in its own goroutine every 500ms.
+func (s *Simulator) probePing(addr string) {
+	start := time.Now()
+	resp, err := s.httpClient.Get(fmt.Sprintf("http://%s/ping", addr))
+	rtt := float64(time.Since(start).Milliseconds())
+
+	isErr := err != nil
+	if err == nil {
+		resp.Body.Close()
+		isErr = resp.StatusCode != http.StatusOK
+	}
+
+	s.mu.Lock()
+	s.probeLatency = rtt
+	s.probeErrors[s.probeIdx] = isErr
+	s.probeIdx = (s.probeIdx + 1) % probeWindowSize
+	if s.probeIdx == 0 {
+		s.probeFilled = true
+	}
+	s.mu.Unlock()
+}
+
+// errorRate computes error % from the rolling window. Must be called with s.mu held.
+func (s *Simulator) errorRate() float64 {
+	size := probeWindowSize
+	if !s.probeFilled {
+		size = s.probeIdx
+	}
+	if size == 0 {
+		return 0
+	}
+	var errs int
+	for i := 0; i < size; i++ {
+		if s.probeErrors[i] {
+			errs++
+		}
+	}
+	return float64(errs) / float64(size) * 100
+}
+
 func (s *Simulator) tick() Metrics {
 	// Collect real host metrics outside the lock (cpu.Percent blocks 200ms)
 	cpuVal := realCPU()
@@ -97,25 +156,16 @@ func (s *Simulator) tick() Metrics {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Simulated latency and error rate drift
-	s.latBase = clamp(s.latBase+noise(30), 50, 2000)
-	s.errBase = clamp(s.errBase+noise(0.5), 0, 25)
+	// Real probe measurements
+	lat := s.probeLatency
+	err := s.errorRate()
 
-	lat := s.latBase + noise(50)
-	err := s.errBase + noise(1)
-
-	// Apply trigger spikes
+	// Apply trigger spikes (override real values)
 	if s.trigger.CPU {
 		cpuVal = clamp(88+noise(4), 85, 100)
 	}
 	if s.trigger.Memory {
 		memVal = clamp(85+noise(3), 80, 100)
-	}
-	if s.trigger.Latency {
-		lat = clamp(1600+noise(200), 1500, 3000)
-	}
-	if s.trigger.ErrorRate {
-		err = clamp(12+noise(3), 10, 30)
 	}
 
 	s.current = Metrics{
@@ -134,13 +184,14 @@ func (s *Simulator) Current() Metrics {
 	return s.current
 }
 
-// Run emits metrics every 500ms via the returned channel.
-func (s *Simulator) Run() <-chan Metrics {
+// Run emits metrics every 500ms and probes /ping on the given address.
+func (s *Simulator) Run(addr string) <-chan Metrics {
 	ch := make(chan Metrics, 4)
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
+			go s.probePing(addr)
 			ch <- s.tick()
 		}
 	}()

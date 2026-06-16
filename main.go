@@ -9,8 +9,10 @@ func main() {
 	hub := newHub()
 	go hub.run()
 
+	const listenAddr = "localhost:8080"
+
 	sim := newSimulator()
-	metricsCh := sim.Run()
+	metricsCh := sim.Run(listenAddr)
 
 	claude := newClaudeClient()
 	if claude == nil {
@@ -29,8 +31,8 @@ func main() {
 
 	mux := newServeMux(hub, sim)
 
-	log.Println("[main] aiops-bot listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	log.Printf("[main] aiops-bot listening on %s", listenAddr)
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("[main] server error: %v", err)
 	}
 }
