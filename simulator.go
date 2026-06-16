@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -39,21 +40,29 @@ type Simulator struct {
 	trigger TriggerMode
 
 	// rolling probe window
-	probeLatency float64   // last measured RTT ms
+	probeLatency float64              // last measured RTT ms
 	probeErrors  [probeWindowSize]bool // ring buffer: true = error
 	probeIdx     int
 	probeFilled  bool
 
 	httpClient *http.Client
+	promClient *PrometheusClient // non-nil when PROMETHEUS_URL is set
 }
 
 func newSimulator() *Simulator {
-	return &Simulator{
+	s := &Simulator{
 		probeLatency: 0,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 	}
+	if u := os.Getenv("PROMETHEUS_URL"); u != "" {
+		s.promClient = NewPrometheusClient(u)
+		slog.Info("prometheus mode active", "url", u)
+	} else {
+		slog.Info("host metrics mode active")
+	}
+	return s
 }
 
 func (s *Simulator) SetTrigger(t TriggerMode) {
@@ -149,30 +158,65 @@ func (s *Simulator) errorRate() float64 {
 }
 
 func (s *Simulator) tick() Metrics {
-	// Collect real host metrics outside the lock (cpu.Percent blocks 200ms)
-	cpuVal := realCPU()
-	memVal := realMemory()
+	// --- CPU & Memory: Prometheus preferred, gopsutil fallback ---
+	var cpuVal, memVal float64
+	var promLatency, promErr float64 = -1, -1
+
+	if s.promClient != nil {
+		snap := s.promClient.Fetch()
+		promLatency = snap.Latency
+		promErr = snap.ErrorRate
+		if snap.CPU >= 0 {
+			cpuVal = snap.CPU
+		} else {
+			cpuVal = realCPU()
+		}
+		if snap.Memory >= 0 {
+			memVal = snap.Memory
+		} else {
+			memVal = realMemory()
+		}
+	} else {
+		// cpu.Percent blocks 200ms — call before acquiring lock
+		cpuVal = realCPU()
+		memVal = realMemory()
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Real probe measurements
-	lat := s.probeLatency
-	err := s.errorRate()
+	// --- Latency & ErrorRate: Prometheus preferred, /ping probe fallback ---
+	var lat, errRate float64
+	if promLatency >= 0 {
+		lat = promLatency
+	} else {
+		lat = s.probeLatency
+	}
+	if promErr >= 0 {
+		errRate = promErr
+	} else {
+		errRate = s.errorRate()
+	}
 
-	// Apply trigger spikes (override real values)
+	// Apply trigger spikes (override all sources)
 	if s.trigger.CPU {
 		cpuVal = clamp(88+noise(4), 85, 100)
 	}
 	if s.trigger.Memory {
 		memVal = clamp(85+noise(3), 80, 100)
 	}
+	if s.trigger.Latency {
+		lat = clamp(1600+noise(200), 1500, 3000)
+	}
+	if s.trigger.ErrorRate {
+		errRate = clamp(12+noise(3), 10, 30)
+	}
 
 	s.current = Metrics{
 		CPU:       math.Round(clamp(cpuVal, 0, 100)*100) / 100,
 		Memory:    math.Round(clamp(memVal, 0, 100)*100) / 100,
 		Latency:   math.Round(clamp(lat, 0, 5000)*100) / 100,
-		ErrorRate: math.Round(clamp(err, 0, 100)*100) / 100,
+		ErrorRate: math.Round(clamp(errRate, 0, 100)*100) / 100,
 		Timestamp: time.Now().UnixMilli(),
 	}
 	return s.current
