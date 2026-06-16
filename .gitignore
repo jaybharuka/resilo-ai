@@ -3,6 +3,7 @@
 *.env
 .env.local
 .env.*.local
+config.yaml
 
 # Build output
 aiops-bot

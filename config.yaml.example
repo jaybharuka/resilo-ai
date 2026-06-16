@@ -1,0 +1,24 @@
+server:
+  port: 8080
+
+ai:
+  provider: nvidia        # nvidia | anthropic
+  api_key: ""             # overridden by NVIDIA_API_KEY or ANTHROPIC_API_KEY env vars
+  model: "abacusai/dracarys-llama-3.1-70b-instruct"
+
+prometheus:
+  url: ""                 # overridden by PROMETHEUS_URL env var
+
+alerts:
+  cpu_warning: 70
+  cpu_critical: 85
+  memory_warning: 65
+  memory_critical: 80
+  latency_warning_ms: 800
+  latency_critical_ms: 1500
+  error_warning: 5
+  error_critical: 10
+  cooldown_seconds: 30
+
+store:
+  path: "alerts.db"

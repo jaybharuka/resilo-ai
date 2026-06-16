@@ -30,27 +30,6 @@ type WSMessage struct {
 	Payload interface{} `json:"payload"`
 }
 
-// Thresholds defines the alert trigger points.
-var Thresholds = struct {
-	CPUCritical    float64
-	CPUWarning     float64
-	MemCritical    float64
-	MemWarning     float64
-	LatCritical    float64
-	LatWarning     float64
-	ErrCritical    float64
-	ErrWarning     float64
-}{
-	CPUCritical: 85,
-	CPUWarning:  70,
-	MemCritical: 80,
-	MemWarning:  65,
-	LatCritical: 1500,
-	LatWarning:  800,
-	ErrCritical: 10,
-	ErrWarning:  5,
-}
-
 var alertSeq int
 
 func nextAlertID() string {
@@ -64,17 +43,19 @@ type AlertEngine struct {
 	sim       *Simulator
 	claudeAPI *ClaudeClient
 	store     *Store
+	cfg       *Config
 
 	// cooldown tracks last-fired time per metric to avoid storms
 	cooldown map[string]time.Time
 }
 
-func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store) *AlertEngine {
+func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store, cfg *Config) *AlertEngine {
 	return &AlertEngine{
 		hub:       hub,
 		sim:       sim,
 		claudeAPI: claude,
 		store:     store,
+		cfg:       cfg,
 		cooldown:  make(map[string]time.Time),
 	}
 }
@@ -89,17 +70,18 @@ func (ae *AlertEngine) cooldownOK(key string, dur time.Duration) bool {
 }
 
 func (ae *AlertEngine) evaluate(m Metrics) {
+	a := ae.cfg.Alerts
 	checks := []struct {
-		key       string
-		metric    string
-		value     float64
-		critical  float64
-		warning   float64
+		key      string
+		metric   string
+		value    float64
+		critical float64
+		warning  float64
 	}{
-		{"cpu", "CPU Usage", m.CPU, Thresholds.CPUCritical, Thresholds.CPUWarning},
-		{"mem", "Memory Usage", m.Memory, Thresholds.MemCritical, Thresholds.MemWarning},
-		{"lat", "Latency", m.Latency, Thresholds.LatCritical, Thresholds.LatWarning},
-		{"err", "Error Rate", m.ErrorRate, Thresholds.ErrCritical, Thresholds.ErrWarning},
+		{"cpu", "CPU Usage", m.CPU, a.CPUCritical, a.CPUWarning},
+		{"mem", "Memory Usage", m.Memory, a.MemoryCritical, a.MemoryWarning},
+		{"lat", "Latency", m.Latency, a.LatencyCriticalMs, a.LatencyWarningMs},
+		{"err", "Error Rate", m.ErrorRate, a.ErrorCritical, a.ErrorWarning},
 	}
 
 	for _, c := range checks {
@@ -115,10 +97,7 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			continue
 		}
 
-		cooldownDur := 30 * time.Second
-		if severity == SeverityWarning {
-			cooldownDur = 60 * time.Second
-		}
+		cooldownDur := time.Duration(ae.cfg.Alerts.CooldownSeconds) * time.Second
 		if !ae.cooldownOK(c.key+severity, cooldownDur) {
 			continue
 		}

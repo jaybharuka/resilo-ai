@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,9 +11,15 @@ import (
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
+	cfg, err := LoadConfig("config.yaml")
+	if err != nil {
+		slog.Error("failed to load config", "err", err)
+		os.Exit(1)
+	}
+
 	startTime := time.Now()
 
-	store, err := Open("alerts.db")
+	store, err := Open(cfg.Store.Path)
 	if err != nil {
 		slog.Error("failed to open store", "err", err)
 		os.Exit(1)
@@ -22,17 +29,17 @@ func main() {
 	hub := newHub()
 	go hub.run()
 
-	const listenAddr = "localhost:8080"
+	listenAddr := fmt.Sprintf("localhost:%d", cfg.Server.Port)
 
-	sim := newSimulator()
+	sim := newSimulator(cfg)
 	metricsCh := sim.Run(listenAddr)
 
-	claude := newClaudeClient()
+	claude := newClaudeClient(cfg)
 	if claude == nil {
-		slog.Warn("AI analysis disabled", "reason", "NVIDIA_API_KEY not set")
+		slog.Warn("AI analysis disabled", "reason", "no AI API key configured")
 	}
 
-	alertEngine := newAlertEngine(hub, sim, claude, store)
+	alertEngine := newAlertEngine(hub, sim, claude, store, cfg)
 	go alertEngine.Run()
 
 	// Fan-out simulator metrics to WebSocket clients

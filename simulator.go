@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -49,16 +48,16 @@ type Simulator struct {
 	promClient *PrometheusClient // non-nil when PROMETHEUS_URL is set
 }
 
-func newSimulator() *Simulator {
+func newSimulator(cfg *Config) *Simulator {
 	s := &Simulator{
 		probeLatency: 0,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 	}
-	if u := os.Getenv("PROMETHEUS_URL"); u != "" {
-		s.promClient = NewPrometheusClient(u)
-		slog.Info("prometheus mode active", "url", u)
+	if cfg.Prometheus.URL != "" {
+		s.promClient = NewPrometheusClient(cfg.Prometheus.URL)
+		slog.Info("prometheus mode active", "url", cfg.Prometheus.URL)
 	} else {
 		slog.Info("host metrics mode active")
 	}
@@ -198,18 +197,14 @@ func (s *Simulator) tick() Metrics {
 		errRate = s.errorRate()
 	}
 
-	// Apply trigger spikes (override all sources)
+	// CPU/Memory have no real spike mechanism, so triggers still synthesize a value.
+	// Latency/ErrorRate are left alone here: /ping already behaves differently when
+	// these triggers are active, so probeLatency/errorRate() already reflect the spike.
 	if s.trigger.CPU {
 		cpuVal = clamp(88+noise(4), 85, 100)
 	}
 	if s.trigger.Memory {
 		memVal = clamp(85+noise(3), 80, 100)
-	}
-	if s.trigger.Latency {
-		lat = clamp(1600+noise(200), 1500, 3000)
-	}
-	if s.trigger.ErrorRate {
-		errRate = clamp(12+noise(3), 10, 30)
 	}
 
 	s.current = Metrics{

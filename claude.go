@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
 
 const nvidiaAPIURL = "https://integrate.api.nvidia.com/v1/chat/completions"
-const nvidiaModel = "abacusai/dracarys-llama-3.1-70b-instruct"
+const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 
-// ClaudeClient wraps the NVIDIA NIM (OpenAI-compatible) chat completions API.
+// ClaudeClient wraps either the NVIDIA NIM (OpenAI-compatible) chat completions
+// API or the Anthropic Messages API, selected by AIConfig.Provider.
 type ClaudeClient struct {
+	provider   string
 	apiKey     string
+	model      string
 	httpClient *http.Client
 }
 
@@ -30,24 +32,25 @@ type AIResponse struct {
 	Timestamp   int64  `json:"timestamp"`
 }
 
-func newClaudeClient() *ClaudeClient {
-	key := os.Getenv("NVIDIA_API_KEY")
-	if key == "" {
+func newClaudeClient(cfg *Config) *ClaudeClient {
+	if cfg.AI.APIKey == "" {
 		return nil
 	}
 	return &ClaudeClient{
-		apiKey:     key,
+		provider:   strings.ToLower(cfg.AI.Provider),
+		apiKey:     cfg.AI.APIKey,
+		model:      cfg.AI.Model,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
 type chatCompletionRequest struct {
-	Model       string          `json:"model"`
-	Messages    []chatMessage   `json:"messages"`
-	Temperature float64         `json:"temperature"`
-	TopP        float64         `json:"top_p"`
-	MaxTokens   int             `json:"max_tokens"`
-	Stream      bool            `json:"stream"`
+	Model       string        `json:"model"`
+	Messages    []chatMessage `json:"messages"`
+	Temperature float64       `json:"temperature"`
+	TopP        float64       `json:"top_p"`
+	MaxTokens   int           `json:"max_tokens"`
+	Stream      bool          `json:"stream"`
 }
 
 type chatMessage struct {
@@ -59,6 +62,23 @@ type chatCompletionResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+}
+
+type anthropicRequest struct {
+	Model     string             `json:"model"`
+	MaxTokens int                `json:"max_tokens"`
+	Messages  []anthropicMessage `json:"messages"`
+}
+
+type anthropicMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type anthropicResponse struct {
+	Content []struct {
+		Text string `json:"text"`
+	} `json:"content"`
 }
 
 type analysisJSON struct {
@@ -96,50 +116,16 @@ IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown cod
 		m.CPU, m.Memory, m.Latency, m.ErrorRate,
 	)
 
-	reqBody := chatCompletionRequest{
-		Model: nvidiaModel,
-		Messages: []chatMessage{
-			{Role: "user", Content: prompt},
-		},
-		Temperature: 0.5,
-		TopP:        1,
-		MaxTokens:   1024,
-		Stream:      false,
+	var text string
+	var err error
+	if c.provider == "anthropic" {
+		text, err = c.callAnthropic(prompt)
+	} else {
+		text, err = c.callNVIDIA(prompt)
 	}
-
-	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, err
 	}
-
-	req, err := http.NewRequest("POST", nvidiaAPIURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("nvidia API error %d: %s", resp.StatusCode, string(body))
-	}
-
-	var apiResp chatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(apiResp.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from model")
-	}
-
-	text := apiResp.Choices[0].Message.Content
 
 	// Strip markdown code fences if the model wrapped the JSON
 	clean := strings.TrimSpace(text)
@@ -160,10 +146,98 @@ IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown cod
 
 	return &AIResponse{
 		AlertID:     alert.ID,
-		Model:       nvidiaModel,
+		Model:       c.model,
 		RootCause:   analysis.RootCause,
 		Remediation: analysis.Remediation,
 		Confidence:  analysis.Confidence,
 		Timestamp:   time.Now().UnixMilli(),
 	}, nil
+}
+
+func (c *ClaudeClient) callNVIDIA(prompt string) (string, error) {
+	reqBody := chatCompletionRequest{
+		Model: c.model,
+		Messages: []chatMessage{
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.5,
+		TopP:        1,
+		MaxTokens:   1024,
+		Stream:      false,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", nvidiaAPIURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("nvidia API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp chatCompletionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	if len(apiResp.Choices) == 0 {
+		return "", fmt.Errorf("empty response from model")
+	}
+	return apiResp.Choices[0].Message.Content, nil
+}
+
+func (c *ClaudeClient) callAnthropic(prompt string) (string, error) {
+	reqBody := anthropicRequest{
+		Model:     c.model,
+		MaxTokens: 1024,
+		Messages: []anthropicMessage{
+			{Role: "user", Content: prompt},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", anthropicAPIURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp anthropicResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	if len(apiResp.Content) == 0 {
+		return "", fmt.Errorf("empty response from model")
+	}
+	return apiResp.Content[0].Text, nil
 }
