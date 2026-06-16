@@ -12,6 +12,13 @@ func main() {
 
 	startTime := time.Now()
 
+	store, err := Open("alerts.db")
+	if err != nil {
+		slog.Error("failed to open store", "err", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
 	hub := newHub()
 	go hub.run()
 
@@ -25,7 +32,7 @@ func main() {
 		slog.Warn("AI analysis disabled", "reason", "NVIDIA_API_KEY not set")
 	}
 
-	alertEngine := newAlertEngine(hub, sim, claude)
+	alertEngine := newAlertEngine(hub, sim, claude, store)
 	go alertEngine.Run()
 
 	// Fan-out simulator metrics to WebSocket clients
@@ -35,7 +42,7 @@ func main() {
 		}
 	}()
 
-	mux := newServeMux(hub, sim, startTime)
+	mux := newServeMux(hub, sim, store, startTime)
 
 	slog.Info("aiops-bot starting", "addr", listenAddr)
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {

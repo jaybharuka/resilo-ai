@@ -10,6 +10,11 @@ aiops-bot.exe
 /dist/
 /bin/
 
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
+
 # Go toolchain cache
 vendor/
 

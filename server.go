@@ -6,6 +6,8 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -40,7 +42,7 @@ type HealthMetrics struct {
 	ErrorRate float64 `json:"error_rate"`
 }
 
-func newServeMux(hub *Hub, sim *Simulator, startTime time.Time) *http.ServeMux {
+func newServeMux(hub *Hub, sim *Simulator, store *Store, startTime time.Time) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// GET /health — machine-readable status with uptime and current metrics
@@ -91,6 +93,32 @@ func newServeMux(hub *Hub, sim *Simulator, startTime time.Time) *http.ServeMux {
 		hub.register <- client
 		go client.writePump()
 		go client.readPump(hub)
+	})
+
+	// GET /api/alerts — query persisted alerts with optional limit and severity filter
+	mux.HandleFunc("/api/alerts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		severity := strings.ToLower(r.URL.Query().Get("severity"))
+		rows, err := store.QueryAlerts(limit, severity)
+		if err != nil {
+			slog.Error("QueryAlerts failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if rows == nil {
+			rows = []AlertRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rows)
 	})
 
 	// POST /api/trigger — spike specific metrics

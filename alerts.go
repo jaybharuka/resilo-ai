@@ -63,16 +63,18 @@ type AlertEngine struct {
 	hub       *Hub
 	sim       *Simulator
 	claudeAPI *ClaudeClient
+	store     *Store
 
 	// cooldown tracks last-fired time per metric to avoid storms
 	cooldown map[string]time.Time
 }
 
-func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient) *AlertEngine {
+func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store) *AlertEngine {
 	return &AlertEngine{
 		hub:       hub,
 		sim:       sim,
 		claudeAPI: claude,
+		store:     store,
 		cooldown:  make(map[string]time.Time),
 	}
 }
@@ -144,6 +146,9 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			"value", alert.Value,
 			"threshold", alert.Threshold,
 		)
+		if ae.store != nil {
+			ae.store.SaveAlert(alert)
+		}
 		ae.hub.broadcastJSON(WSMessage{Type: "alert", Payload: alert})
 
 		// Async Claude analysis
@@ -168,6 +173,9 @@ func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics) {
 		return
 	}
 	slog.Info("AI analysis ready", "alert_id", alert.ID, "confidence", resp.Confidence)
+	if ae.store != nil {
+		ae.store.UpdateAIResponse(resp.AlertID, resp.RootCause, resp.Remediation, resp.Confidence)
+	}
 	ae.hub.broadcastJSON(WSMessage{
 		Type:    "ai_response",
 		Payload: resp,
