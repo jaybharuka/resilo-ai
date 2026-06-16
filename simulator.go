@@ -1,10 +1,14 @@
 package main
 
 import (
+	"log"
 	"math"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 // Metrics holds the current simulated metric values.
@@ -24,23 +28,19 @@ type TriggerMode struct {
 	ErrorRate bool
 }
 
-// Simulator generates fake metric data with random noise.
+// Simulator collects real CPU/memory from the host and simulates latency/error-rate.
 type Simulator struct {
 	mu      sync.RWMutex
 	current Metrics
 	trigger TriggerMode
 
-	// base values that drift slowly
-	cpuBase    float64
-	memBase    float64
-	latBase    float64
-	errBase    float64
+	// simulated base values for latency and error rate (drift over time)
+	latBase float64
+	errBase float64
 }
 
 func newSimulator() *Simulator {
 	return &Simulator{
-		cpuBase: 40,
-		memBase: 55,
 		latBase: 300,
 		errBase: 2,
 	}
@@ -56,8 +56,6 @@ func (s *Simulator) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trigger = TriggerMode{}
-	s.cpuBase = 40
-	s.memBase = 55
 	s.latBase = 300
 	s.errBase = 2
 }
@@ -70,27 +68,48 @@ func noise(scale float64) float64 {
 	return (rand.Float64()*2 - 1) * scale
 }
 
+// realCPU returns the host CPU usage percent averaged over a 200ms sample.
+// Falls back to 0 on error rather than crashing.
+func realCPU() float64 {
+	pcts, err := cpu.Percent(200*time.Millisecond, false)
+	if err != nil || len(pcts) == 0 {
+		log.Printf("[sim] cpu.Percent error: %v", err)
+		return 0
+	}
+	return pcts[0]
+}
+
+// realMemory returns the host virtual memory used percent.
+func realMemory() float64 {
+	v, err := mem.VirtualMemory()
+	if err != nil {
+		log.Printf("[sim] mem.VirtualMemory error: %v", err)
+		return 0
+	}
+	return v.UsedPercent
+}
+
 func (s *Simulator) tick() Metrics {
+	// Collect real host metrics outside the lock (cpu.Percent blocks 200ms)
+	cpuVal := realCPU()
+	memVal := realMemory()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Slow drift
-	s.cpuBase = clamp(s.cpuBase+noise(1.5), 5, 95)
-	s.memBase = clamp(s.memBase+noise(0.8), 20, 98)
+	// Simulated latency and error rate drift
 	s.latBase = clamp(s.latBase+noise(30), 50, 2000)
 	s.errBase = clamp(s.errBase+noise(0.5), 0, 25)
 
-	cpu := s.cpuBase + noise(3)
-	mem := s.memBase + noise(2)
 	lat := s.latBase + noise(50)
 	err := s.errBase + noise(1)
 
 	// Apply trigger spikes
 	if s.trigger.CPU {
-		cpu = clamp(88+noise(4), 85, 100)
+		cpuVal = clamp(88+noise(4), 85, 100)
 	}
 	if s.trigger.Memory {
-		mem = clamp(85+noise(3), 80, 100)
+		memVal = clamp(85+noise(3), 80, 100)
 	}
 	if s.trigger.Latency {
 		lat = clamp(1600+noise(200), 1500, 3000)
@@ -100,8 +119,8 @@ func (s *Simulator) tick() Metrics {
 	}
 
 	s.current = Metrics{
-		CPU:       math.Round(clamp(cpu, 0, 100)*100) / 100,
-		Memory:    math.Round(clamp(mem, 0, 100)*100) / 100,
+		CPU:       math.Round(clamp(cpuVal, 0, 100)*100) / 100,
+		Memory:    math.Round(clamp(memVal, 0, 100)*100) / 100,
 		Latency:   math.Round(clamp(lat, 0, 5000)*100) / 100,
 		ErrorRate: math.Round(clamp(err, 0, 100)*100) / 100,
 		Timestamp: time.Now().UnixMilli(),
