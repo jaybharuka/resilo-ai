@@ -1,0 +1,24 @@
+# Environment / secrets
+.env
+*.env
+.env.local
+.env.*.local
+
+# Build output
+aiops-bot
+aiops-bot.exe
+/dist/
+/bin/
+
+# Go toolchain cache
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
