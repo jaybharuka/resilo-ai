@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -40,7 +40,7 @@ func (h *Hub) run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.mu.Unlock()
-			log.Printf("[hub] client connected, total=%d", len(h.clients))
+			slog.Info("ws client connected", "total", len(h.clients))
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -49,7 +49,7 @@ func (h *Hub) run() {
 				close(client.send)
 			}
 			h.mu.Unlock()
-			log.Printf("[hub] client disconnected, total=%d", len(h.clients))
+			slog.Info("ws client disconnected", "total", len(h.clients))
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
@@ -70,7 +70,7 @@ func (h *Hub) run() {
 func (h *Hub) broadcastJSON(v interface{}) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		log.Printf("[hub] marshal error: %v", err)
+		slog.Error("broadcast marshal failed", "err", err)
 		return
 	}
 	h.broadcast <- data
@@ -83,7 +83,7 @@ func (c *Client) writePump() {
 		err := c.conn.WriteMessage(websocket.TextMessage, msg)
 		c.mu.Unlock()
 		if err != nil {
-			log.Printf("[client] write error: %v", err)
+			slog.Warn("ws write error", "err", err)
 			return
 		}
 	}

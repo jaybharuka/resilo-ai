@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -136,6 +137,13 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			Timestamp: time.Now().UnixMilli(),
 		}
 
+		slog.Warn("alert fired",
+			"id", alert.ID,
+			"metric", alert.Metric,
+			"severity", alert.Severity,
+			"value", alert.Value,
+			"threshold", alert.Threshold,
+		)
 		ae.hub.broadcastJSON(WSMessage{Type: "alert", Payload: alert})
 
 		// Async Claude analysis
@@ -149,6 +157,7 @@ func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics) {
 	}
 	resp, err := ae.claudeAPI.Analyze(alert, m)
 	if err != nil {
+		slog.Error("AI analysis failed", "alert_id", alert.ID, "err", err)
 		ae.hub.broadcastJSON(WSMessage{
 			Type: "ai_response",
 			Payload: map[string]interface{}{
@@ -158,6 +167,7 @@ func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics) {
 		})
 		return
 	}
+	slog.Info("AI analysis ready", "alert_id", alert.ID, "confidence", resp.Confidence)
 	ae.hub.broadcastJSON(WSMessage{
 		Type:    "ai_response",
 		Payload: resp,

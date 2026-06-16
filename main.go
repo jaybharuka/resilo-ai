@@ -1,11 +1,17 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
+	"time"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	startTime := time.Now()
+
 	hub := newHub()
 	go hub.run()
 
@@ -16,7 +22,7 @@ func main() {
 
 	claude := newClaudeClient()
 	if claude == nil {
-		log.Println("[main] NVIDIA_API_KEY not set — AI analysis disabled")
+		slog.Warn("AI analysis disabled", "reason", "NVIDIA_API_KEY not set")
 	}
 
 	alertEngine := newAlertEngine(hub, sim, claude)
@@ -29,10 +35,11 @@ func main() {
 		}
 	}()
 
-	mux := newServeMux(hub, sim)
+	mux := newServeMux(hub, sim, startTime)
 
-	log.Printf("[main] aiops-bot listening on %s", listenAddr)
+	slog.Info("aiops-bot starting", "addr", listenAddr)
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
-		log.Fatalf("[main] server error: %v", err)
+		slog.Error("server error", "err", err)
+		os.Exit(1)
 	}
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"math/rand"
 	"net/http"
@@ -91,7 +91,7 @@ func noise(scale float64) float64 {
 func realCPU() float64 {
 	pcts, err := cpu.Percent(200*time.Millisecond, false)
 	if err != nil || len(pcts) == 0 {
-		log.Printf("[sim] cpu.Percent error: %v", err)
+		slog.Error("cpu.Percent failed", "err", err)
 		return 0
 	}
 	return pcts[0]
@@ -101,7 +101,7 @@ func realCPU() float64 {
 func realMemory() float64 {
 	v, err := mem.VirtualMemory()
 	if err != nil {
-		log.Printf("[sim] mem.VirtualMemory error: %v", err)
+		slog.Error("mem.VirtualMemory failed", "err", err)
 		return 0
 	}
 	return v.UsedPercent

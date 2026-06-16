@@ -2,7 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
+	"math"
 	"math/rand"
 	"net/http"
 	"time"
@@ -24,8 +25,40 @@ type TriggerRequest struct {
 	ErrorRate bool `json:"error_rate"`
 }
 
-func newServeMux(hub *Hub, sim *Simulator) *http.ServeMux {
+// HealthResponse is returned by GET /health.
+type HealthResponse struct {
+	Status        string         `json:"status"`
+	UptimeSeconds int64          `json:"uptime_seconds"`
+	Metrics       HealthMetrics  `json:"metrics"`
+}
+
+// HealthMetrics holds the last-sampled values for the health check.
+type HealthMetrics struct {
+	CPU       float64 `json:"cpu"`
+	Memory    float64 `json:"memory"`
+	Latency   float64 `json:"latency"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+func newServeMux(hub *Hub, sim *Simulator, startTime time.Time) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// GET /health — machine-readable status with uptime and current metrics
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		m := sim.Current()
+		body := HealthResponse{
+			Status:        "ok",
+			UptimeSeconds: int64(time.Since(startTime).Seconds()),
+			Metrics: HealthMetrics{
+				CPU:       math.Round(m.CPU*100) / 100,
+				Memory:    math.Round(m.Memory*100) / 100,
+				Latency:   math.Round(m.Latency*100) / 100,
+				ErrorRate: math.Round(m.ErrorRate*100) / 100,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(body)
+	})
 
 	// GET /ping — real latency/error probe target
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +81,7 @@ func newServeMux(hub *Hub, sim *Simulator) *http.ServeMux {
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("[ws] upgrade error: %v", err)
+			slog.Warn("ws upgrade failed", "err", err, "remote", r.RemoteAddr)
 			return
 		}
 		client := &Client{
