@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"log/slog"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -25,7 +26,8 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 // Store persists alerts and AI responses to SQLite.
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	closeOnce sync.Once
 }
 
 // AlertRow is the shape returned by GET /api/alerts.
@@ -57,9 +59,11 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// Close releases the DB connection.
+// Close releases the DB connection. Safe to call more than once.
 func (s *Store) Close() error {
-	return s.db.Close()
+	var err error
+	s.closeOnce.Do(func() { err = s.db.Close() })
+	return err
 }
 
 // SaveAlert inserts a new alert row.
@@ -72,6 +76,17 @@ func (s *Store) SaveAlert(a Alert) {
 	)
 	if err != nil {
 		slog.Error("store.SaveAlert failed", "id", a.ID, "err", err)
+	}
+}
+
+// ResolveAlert sets resolved_at on an existing alert row.
+func (s *Store) ResolveAlert(id string, resolvedAt time.Time) {
+	_, err := s.db.Exec(
+		`UPDATE alerts SET resolved_at=? WHERE id=?`,
+		resolvedAt.UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		slog.Error("store.ResolveAlert failed", "id", id, "err", err)
 	}
 }
 

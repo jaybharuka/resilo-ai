@@ -22,3 +22,12 @@ alerts:
 
 store:
   path: "alerts.db"
+
+auth:
+  enabled: true
+  token: ""               # overridden by AUTH_TOKEN env var
+
+ratelimit:
+  enabled: true
+  requests_per_minute: 10
+  burst: 5

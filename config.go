@@ -16,6 +16,14 @@ type Config struct {
 	Prometheus PrometheusConfig `yaml:"prometheus"`
 	Alerts     AlertsConfig     `yaml:"alerts"`
 	Store      StoreConfig      `yaml:"store"`
+	Auth       AuthConfig       `yaml:"auth"`
+	RateLimit  RateLimitConfig  `yaml:"ratelimit"`
+}
+
+type RateLimitConfig struct {
+	Enabled            bool `yaml:"enabled"`
+	RequestsPerMinute  int  `yaml:"requests_per_minute"`
+	Burst              int  `yaml:"burst"`
 }
 
 type ServerConfig struct {
@@ -48,6 +56,11 @@ type StoreConfig struct {
 	Path string `yaml:"path"`
 }
 
+type AuthConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Token   string `yaml:"token"` // overridden by AUTH_TOKEN
+}
+
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{Port: 8080},
@@ -64,10 +77,25 @@ func defaultConfig() *Config {
 			LatencyCriticalMs: 1500,
 			ErrorWarning:      5,
 			ErrorCritical:     10,
-			CooldownSeconds:   30,
+			CooldownSeconds:   60,
 		},
-		Store: StoreConfig{Path: "alerts.db"},
+		Store: StoreConfig{Path: defaultStorePath()},
+		Auth:  AuthConfig{Enabled: true},
+		RateLimit: RateLimitConfig{
+			Enabled:           true,
+			RequestsPerMinute: 10,
+			Burst:             5,
+		},
 	}
+}
+
+// defaultStorePath points at the Fly.io persistent volume mount when running
+// on a Fly machine (FLY_APP_NAME is always set there), otherwise the local file.
+func defaultStorePath() string {
+	if os.Getenv("FLY_APP_NAME") != "" {
+		return "/data/alerts.db"
+	}
+	return "alerts.db"
 }
 
 // LoadConfig reads path (if it exists) over a set of defaults, then applies
@@ -94,6 +122,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if v := os.Getenv(envKey); v != "" {
 		cfg.AI.APIKey = v
+	}
+
+	if v := os.Getenv("AUTH_TOKEN"); v != "" {
+		cfg.Auth.Token = v
 	}
 
 	return cfg, nil

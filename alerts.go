@@ -37,6 +37,17 @@ func nextAlertID() string {
 	return fmt.Sprintf("ALT-%04d", alertSeq)
 }
 
+// activeAlert tracks an alert that has fired for a given metric.
+// resolvedAt is zero while the alert is still open.
+// After resolution the entry is kept until the post-resolution cooldown
+// expires so we don't immediately re-fire on a flapping metric.
+type activeAlert struct {
+	id         string
+	metric     string
+	firedAt    time.Time
+	resolvedAt time.Time
+}
+
 // AlertEngine evaluates metrics and fires alerts.
 type AlertEngine struct {
 	hub       *Hub
@@ -45,32 +56,27 @@ type AlertEngine struct {
 	store     *Store
 	cfg       *Config
 
-	// cooldown tracks last-fired time per metric to avoid storms
-	cooldown map[string]time.Time
+	// activeAlerts is keyed by the short metric key ("cpu", "mem", "lat", "err").
+	// An entry with a zero resolvedAt is an open incident.
+	// An entry with a non-zero resolvedAt is in post-resolution cooldown.
+	activeAlerts map[string]activeAlert
 }
 
 func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store, cfg *Config) *AlertEngine {
 	return &AlertEngine{
-		hub:       hub,
-		sim:       sim,
-		claudeAPI: claude,
-		store:     store,
-		cfg:       cfg,
-		cooldown:  make(map[string]time.Time),
+		hub:          hub,
+		sim:          sim,
+		claudeAPI:    claude,
+		store:        store,
+		cfg:          cfg,
+		activeAlerts: make(map[string]activeAlert),
 	}
-}
-
-func (ae *AlertEngine) cooldownOK(key string, dur time.Duration) bool {
-	last, ok := ae.cooldown[key]
-	if !ok || time.Since(last) > dur {
-		ae.cooldown[key] = time.Now()
-		return true
-	}
-	return false
 }
 
 func (ae *AlertEngine) evaluate(m Metrics) {
 	a := ae.cfg.Alerts
+	cooldown := time.Duration(a.CooldownSeconds) * time.Second
+
 	checks := []struct {
 		key      string
 		metric   string
@@ -85,21 +91,62 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 	}
 
 	for _, c := range checks {
+		active, hasActive := ae.activeAlerts[c.key]
+
+		// --- Resolution path: metric dropped below warning ---
+		if c.value < c.warning {
+			if hasActive && active.resolvedAt.IsZero() {
+				// Open incident just cleared.
+				now := time.Now()
+				dur := int(now.Sub(active.firedAt).Seconds())
+				slog.Info("alert resolved",
+					"id", active.id,
+					"metric", active.metric,
+					"duration_seconds", dur,
+				)
+				if ae.store != nil {
+					ae.store.ResolveAlert(active.id, now)
+				}
+				ae.hub.broadcastJSON(WSMessage{
+					Type: "alert_resolved",
+					Payload: map[string]interface{}{
+						"alert_id":         active.id,
+						"metric":           active.metric,
+						"duration_seconds": dur,
+						"resolved_at":      now.UnixMilli(),
+					},
+				})
+				active.resolvedAt = now
+				ae.activeAlerts[c.key] = active
+			} else if hasActive && !active.resolvedAt.IsZero() && time.Since(active.resolvedAt) >= cooldown {
+				// Post-resolution cooldown expired — clean up entry.
+				delete(ae.activeAlerts, c.key)
+			}
+			continue
+		}
+
+		// --- Firing path: metric is at or above warning ---
 		var severity string
 		var threshold float64
 		if c.value >= c.critical {
 			severity = SeverityCritical
 			threshold = c.critical
-		} else if c.value >= c.warning {
+		} else {
 			severity = SeverityWarning
 			threshold = c.warning
-		} else {
-			continue
 		}
 
-		cooldownDur := time.Duration(ae.cfg.Alerts.CooldownSeconds) * time.Second
-		if !ae.cooldownOK(c.key+severity, cooldownDur) {
-			continue
+		if hasActive {
+			if active.resolvedAt.IsZero() {
+				// Incident already open — do not re-fire.
+				continue
+			}
+			if time.Since(active.resolvedAt) < cooldown {
+				// Still within post-resolution cooldown — do not re-fire.
+				continue
+			}
+			// Cooldown expired while metric is still elevated — treat as new incident.
+			delete(ae.activeAlerts, c.key)
 		}
 
 		unit := "%"
@@ -107,6 +154,7 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			unit = "ms"
 		}
 
+		now := time.Now()
 		alert := Alert{
 			ID:        nextAlertID(),
 			Type:      "alert",
@@ -115,7 +163,13 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			Threshold: threshold,
 			Severity:  severity,
 			Message:   fmt.Sprintf("%s is %.2f%s (threshold: %.0f%s)", c.metric, c.value, unit, threshold, unit),
-			Timestamp: time.Now().UnixMilli(),
+			Timestamp: now.UnixMilli(),
+		}
+
+		ae.activeAlerts[c.key] = activeAlert{
+			id:      alert.ID,
+			metric:  c.metric,
+			firedAt: now,
 		}
 
 		slog.Warn("alert fired",
@@ -130,7 +184,6 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 		}
 		ae.hub.broadcastJSON(WSMessage{Type: "alert", Payload: alert})
 
-		// Async Claude analysis
 		go ae.analyzeWithClaude(alert, m)
 	}
 }

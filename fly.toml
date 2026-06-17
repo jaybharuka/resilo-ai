@@ -1,0 +1,40 @@
+# fly.toml app configuration file for resilo-ai
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = 'resilo-ai'
+primary_region = 'bom'
+
+[build]
+
+[env]
+  # Secrets are NOT set here — they're injected at runtime via `fly secrets set`.
+  # Required:
+  #   NVIDIA_API_KEY   — fly secrets set NVIDIA_API_KEY=...
+  # Optional (see config.yaml.example):
+  #   ANTHROPIC_API_KEY, PROMETHEUS_URL
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[mounts]
+  source = "aiops_data"
+  destination = "/data"
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

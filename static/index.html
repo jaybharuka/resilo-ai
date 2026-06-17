@@ -282,6 +282,15 @@
 </main>
 
 <script>
+// ── Auth token (injected by the server into a meta tag) ─────────
+const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
+
+function authHeaders(extra) {
+  const h = Object.assign({}, extra);
+  if (AUTH_TOKEN) h['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  return h;
+}
+
 // ── Metric config ─────────────────────────────────────────────
 const METRICS = [
   { key: 'cpu',        label: 'CPU Usage',   unit: '%',  warnT: 70, critT: 85,   color: '#58a6ff' },
@@ -521,7 +530,7 @@ function trigger(type) {
 
   fetch('/api/trigger', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       cpu:        triggerState.cpu,
       memory:     triggerState.memory,
@@ -536,7 +545,7 @@ function resetAll() {
   ['btnCPU','btnMemory','btnLatency','btnError'].forEach(id =>
     document.getElementById(id).classList.remove('active')
   );
-  fetch('/api/reset', { method: 'POST' });
+  fetch('/api/reset', { method: 'POST', headers: authHeaders() });
 }
 
 // ── Clock ───────────────────────────────────────────────────────
@@ -555,7 +564,8 @@ let ws, reconnectTimer;
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const tokenParam = AUTH_TOKEN ? `?token=${encodeURIComponent(AUTH_TOKEN)}` : '';
+  ws = new WebSocket(`${proto}://${location.host}/ws${tokenParam}`);
 
   ws.onopen = () => {
     wsDot.classList.add('connected');

@@ -1,6 +1,8 @@
 # ── Build stage ──────────────────────────────────────────────────
 FROM golang:1.22-alpine AS builder
 
+RUN apk add --no-cache ca-certificates
+
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -14,8 +16,10 @@ FROM scratch
 
 WORKDIR /app
 
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/aiops-bot .
 COPY static/ ./static/
+COPY config.yaml.example ./
 
 EXPOSE 8080
 
