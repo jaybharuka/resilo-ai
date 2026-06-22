@@ -66,7 +66,7 @@ func (m *Mailer) SendDownAlert(to, monitorName, url, rootCause, remediation stri
     <h1 style="margin:0;font-size:18px;color:#fff;">🚨 Monitor Down</h1>
   </div>
   <div style="background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+    <table style="width:100%%;border-collapse:collapse;margin-bottom:20px;">
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;width:90px;">Monitor</td><td style="font-weight:700;">%s</td></tr>
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">URL</td><td><a href="%s" style="color:#58a6ff;text-decoration:none;">%s</a></td></tr>
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Latency</td><td>%dms</td></tr>
@@ -101,7 +101,7 @@ func (m *Mailer) SendRecoveryAlert(to, monitorName, url string, downDuration tim
     <h1 style="margin:0;font-size:18px;color:#0d1117;">✅ Monitor Recovered</h1>
   </div>
   <div style="background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+    <table style="width:100%%;border-collapse:collapse;margin-bottom:20px;">
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;width:90px;">Monitor</td><td style="font-weight:700;">%s</td></tr>
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">URL</td><td><a href="%s" style="color:#58a6ff;text-decoration:none;">%s</a></td></tr>
       <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Down For</td><td style="color:#f85149;font-weight:700;">%s</td></tr>
