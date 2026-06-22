@@ -155,6 +155,16 @@ IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown cod
 }
 
 func (c *ClaudeClient) callNVIDIA(prompt string) (string, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		slog.Info("AI API call completed",
+			"provider", "nvidia",
+			"model", c.model,
+			"duration_ms", duration.Milliseconds(),
+		)
+	}()
+
 	reqBody := chatCompletionRequest{
 		Model: c.model,
 		Messages: []chatMessage{
@@ -200,6 +210,16 @@ func (c *ClaudeClient) callNVIDIA(prompt string) (string, error) {
 }
 
 func (c *ClaudeClient) callAnthropic(prompt string) (string, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		slog.Info("AI API call completed",
+			"provider", "anthropic",
+			"model", c.model,
+			"duration_ms", duration.Milliseconds(),
+		)
+	}()
+
 	reqBody := anthropicRequest{
 		Model:     c.model,
 		MaxTokens: 1024,
