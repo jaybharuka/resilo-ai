@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS monitor_results (
   error       TEXT,
   checked_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (monitor_id) REFERENCES monitors(id)
+);
+
+CREATE TABLE IF NOT EXISTS outages (
+  id           TEXT PRIMARY KEY,
+  monitor_id   TEXT NOT NULL,
+  started_at   DATETIME NOT NULL,
+  resolved_at  DATETIME,
+  root_cause   TEXT,
+  remediation  TEXT,
+  status_code  INTEGER,
+  error        TEXT,
+  FOREIGN KEY (monitor_id) REFERENCES monitors(id)
 );`
 
 // Store persists alerts and AI responses to SQLite.
@@ -230,6 +242,23 @@ func (s *Store) GetUserBySession(token string) (User, error) {
 func (s *Store) DeleteSession(token string) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
 	return err
+}
+
+// GetUserByMonitorID returns the owner of a monitor (used by checker for email routing).
+func (s *Store) GetUserByMonitorID(monitorID string) (User, error) {
+	var u User
+	var createdAt string
+	err := s.db.QueryRow(`
+		SELECT u.id, u.email, u.password_hash, u.created_at
+		FROM users u
+		JOIN monitors m ON m.user_id = u.id
+		WHERE m.id = ?`, monitorID,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+	if err != nil {
+		return User{}, err
+	}
+	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return u, nil
 }
 
 // Monitor is a URL the user wants to check on a schedule.

@@ -267,3 +267,60 @@ func (c *ClaudeClient) callAnthropic(prompt string) (string, error) {
 	}
 	return apiResp.Content[0].Text, nil
 }
+
+// AnalyzeOutage asks the AI for a root cause and remediation steps when a monitor goes DOWN.
+func (c *ClaudeClient) AnalyzeOutage(monitor Monitor, result MonitorResult) (rootCause, remediation string, err error) {
+	statusStr := "connection error"
+	if result.StatusCode != nil && *result.StatusCode != 0 {
+		statusStr = fmt.Sprintf("%d", *result.StatusCode)
+	}
+	errStr := ""
+	if result.Error != nil {
+		errStr = *result.Error
+	}
+	latencyMs := 0
+	if result.LatencyMs != nil {
+		latencyMs = *result.LatencyMs
+	}
+
+	prompt := fmt.Sprintf(`You are an SRE AI diagnosing a website outage.
+
+Monitor name: %s
+URL: %s
+HTTP status: %s
+Error message: %s
+Response latency: %dms
+
+Respond with ONLY raw JSON (no markdown, no backticks):
+{
+  "root_cause": "one clear sentence explaining why the site is down",
+  "remediation": "1. First step\n2. Second step\n3. Third step"
+}`, monitor.Name, monitor.URL, statusStr, errStr, latencyMs)
+
+	var text string
+	if c.provider == "anthropic" {
+		text, err = c.callAnthropic(prompt)
+	} else {
+		text, err = c.callNVIDIA(prompt)
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	clean := strings.TrimSpace(text)
+	if idx := strings.Index(clean, "{"); idx > 0 {
+		clean = clean[idx:]
+	}
+	if idx := strings.LastIndex(clean, "}"); idx >= 0 && idx < len(clean)-1 {
+		clean = clean[:idx+1]
+	}
+
+	var parsed struct {
+		RootCause   string `json:"root_cause"`
+		Remediation string `json:"remediation"`
+	}
+	if parseErr := json.Unmarshal([]byte(clean), &parsed); parseErr != nil {
+		return text, "", nil
+	}
+	return parsed.RootCause, parsed.Remediation, nil
+}

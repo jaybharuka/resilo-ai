@@ -19,6 +19,7 @@ type Config struct {
 	Store      StoreConfig      `yaml:"store"`
 	Auth       AuthConfig       `yaml:"auth"`
 	RateLimit  RateLimitConfig  `yaml:"ratelimit"`
+	Mail       MailConfig       `yaml:"mail"`
 }
 
 type RateLimitConfig struct {
@@ -62,6 +63,13 @@ type AuthConfig struct {
 	Token   string `yaml:"token"` // overridden by AUTH_TOKEN
 }
 
+type MailConfig struct {
+	SMTPHost    string `yaml:"smtp_host"`
+	SMTPPort    int    `yaml:"smtp_port"`
+	FromEmail   string `yaml:"from_email"`  // overridden by GMAIL_ADDRESS
+	AppPassword string `yaml:"app_password"` // overridden by GMAIL_APP_PASSWORD
+}
+
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{Port: 8080},
@@ -82,6 +90,10 @@ func defaultConfig() *Config {
 		},
 		Store: StoreConfig{Path: defaultStorePath()},
 		Auth:  AuthConfig{Enabled: true},
+		Mail: MailConfig{
+			SMTPHost: "smtp.gmail.com",
+			SMTPPort: 587,
+		},
 		RateLimit: RateLimitConfig{
 			Enabled:           true,
 			RequestsPerMinute: 10,
@@ -127,6 +139,13 @@ func LoadConfig(path string) (*Config, error) {
 
 	if v := os.Getenv("AUTH_TOKEN"); v != "" {
 		cfg.Auth.Token = v
+	}
+
+	if v := os.Getenv("GMAIL_ADDRESS"); v != "" {
+		cfg.Mail.FromEmail = v
+	}
+	if v := os.Getenv("GMAIL_APP_PASSWORD"); v != "" {
+		cfg.Mail.AppPassword = v
 	}
 
 	// Validate critical configuration

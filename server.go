@@ -634,6 +634,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	mux.HandleFunc("POST /api/monitors", monitorsCreateHandler(store))
 	mux.HandleFunc("DELETE /api/monitors/{id}", monitorsDeleteHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
+	mux.HandleFunc("GET /api/monitors/{id}/outages", monitorsOutagesHandler(store))
 
 	return mux
 }
@@ -747,5 +748,26 @@ func monitorsResultsHandler(store *Store) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
+	}
+}
+
+func monitorsOutagesHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		id := r.PathValue("id")
+		outages, err := store.GetOutagesByMonitor(id, 10)
+		if err != nil {
+			slog.Error("GetOutagesByMonitor failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if outages == nil {
+			outages = []Outage{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(outages)
 	}
 }

@@ -187,6 +187,32 @@
     .btn-delete:hover { color: var(--red); }
     .monitor-error { font-size: 10px; color: var(--red); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .monitors-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 32px 0; }
+    .outage-toggle {
+      margin-top: 8px;
+      font-size: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      transition: color .15s;
+    }
+    .outage-toggle:hover { color: var(--accent); }
+    .outage-detail { margin-top: 8px; display: none; }
+    .outage-item {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .outage-item.ongoing { border-left: 2px solid var(--red); }
+    .outage-item.resolved { border-left: 2px solid var(--muted); }
+    .outage-ts { color: var(--muted); font-size: 10px; display: flex; justify-content: space-between; }
+    .outage-cause { color: var(--text); margin-top: 5px; line-height: 1.4; }
+    .outage-remediation { color: var(--muted); margin-top: 4px; font-size: 10px; line-height: 1.5; }
+    .outage-pending { color: var(--muted); font-style: italic; }
 
     /* ── Divider ── */
     .section-divider { height: 1px; background: var(--border); }
@@ -555,6 +581,8 @@ function renderMonitors(monitors) {
         <span>🕐 ${checked}</span>
         <span>↻ ${intervalLabel}</span>
       </div>
+      <div class="outage-toggle" id="toggle-${m.id}" onclick="toggleOutages('${m.id}')">▶ Outage history</div>
+      <div class="outage-detail" id="outage-detail-${m.id}"></div>
       <button class="btn-delete" title="Delete monitor" onclick="deleteMonitor('${m.id}')">✕</button>
     `;
     monitorGrid.appendChild(card);
@@ -585,6 +613,82 @@ async function deleteMonitor(id) {
   } catch (e) {
     console.error('deleteMonitor:', e);
   }
+}
+
+const outageCache = {}; // monitorID -> { loaded: bool }
+
+async function toggleOutages(id) {
+  const detail  = document.getElementById(`outage-detail-${id}`);
+  const toggle  = document.getElementById(`toggle-${id}`);
+  if (!detail || !toggle) return;
+
+  const open = detail.style.display === 'block';
+  if (open) {
+    detail.style.display = 'none';
+    toggle.textContent = '▶ Outage history';
+    return;
+  }
+
+  detail.style.display = 'block';
+  toggle.textContent = '▼ Outage history';
+
+  if (outageCache[id]) return; // already fetched
+  outageCache[id] = true;
+  detail.innerHTML = `<div class="outage-pending">Loading…</div>`;
+
+  try {
+    const res = await fetch(`/api/monitors/${id}/outages`, { credentials: 'include' });
+    if (!res.ok) { detail.innerHTML = `<div class="outage-pending">Failed to load.</div>`; return; }
+    const outages = await res.json();
+    renderOutages(id, outages || []);
+  } catch (e) {
+    detail.innerHTML = `<div class="outage-pending">Error loading outages.</div>`;
+  }
+}
+
+function renderOutages(monitorId, outages) {
+  const detail = document.getElementById(`outage-detail-${monitorId}`);
+  if (!detail) return;
+
+  if (outages.length === 0) {
+    detail.innerHTML = `<div class="outage-pending">No outages recorded — great!</div>`;
+    return;
+  }
+
+  const shown = outages.slice(0, 3);
+  detail.innerHTML = shown.map(o => {
+    const isOngoing  = !o.resolved_at;
+    const cls        = isOngoing ? 'ongoing' : 'resolved';
+    const started    = new Date(o.started_at).toLocaleString();
+    const durLabel   = isOngoing
+      ? '<span style="color:var(--red);">Ongoing</span>'
+      : `${fmtDuration(new Date(o.started_at), new Date(o.resolved_at))}`;
+
+    const causeHtml  = o.root_cause
+      ? `<div class="outage-cause">${escHtml(o.root_cause)}</div>`
+      : `<div class="outage-pending">Analysis pending…</div>`;
+
+    const remHtml = o.remediation
+      ? `<div class="outage-remediation">${escHtml(o.remediation).replace(/\n/g,'<br>')}</div>`
+      : '';
+
+    return `
+      <div class="outage-item ${cls}">
+        <div class="outage-ts">
+          <span>${started}</span>
+          <span>${durLabel}</span>
+        </div>
+        ${causeHtml}
+        ${remHtml}
+      </div>`;
+  }).join('');
+}
+
+function fmtDuration(from, to) {
+  const secs = Math.floor((to - from) / 1000);
+  if (secs < 60)   return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
 }
 
 document.getElementById('addMonitorForm').addEventListener('submit', async (e) => {

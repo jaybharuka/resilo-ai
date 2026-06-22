@@ -48,10 +48,15 @@ func main() {
 		slog.Warn("auth disabled — set AUTH_TOKEN in production")
 	}
 
+	mailer := newMailer(cfg)
+	if mailer == nil {
+		slog.Warn("email alerts disabled — set GMAIL_ADDRESS and GMAIL_APP_PASSWORD to enable")
+	}
+
 	alertEngine := newAlertEngine(hub, sim, claude, store, cfg)
 	go alertEngine.Run()
 
-	checker := newChecker(store)
+	checker := newChecker(store, claude, mailer)
 
 	// Fan-out simulator metrics to WebSocket clients.
 	go func() {
