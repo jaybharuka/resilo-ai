@@ -525,15 +525,73 @@
 const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
 const USER_SLUG  = document.querySelector('meta[name="USER_SLUG"]')?.content  || '';
 
-(function () {
+let currentSlug = USER_SLUG;
+
+function applySlug(slug) {
+  currentSlug = slug;
   const link = document.getElementById('statusPageLink');
-  if (USER_SLUG && link) {
-    link.href = `/status/${USER_SLUG}`;
-    link.title = `resilo-ai.fly.dev/status/${USER_SLUG}`;
-  } else if (link) {
-    link.style.display = 'none';
+  const area = document.getElementById('slugArea');
+  if (slug) {
+    link.href  = `/status/${slug}`;
+    link.title = `resilo-ai.fly.dev/status/${slug}`;
+    area.style.display = 'flex';
+  } else {
+    area.style.display = 'none';
   }
-})();
+}
+
+function showSlugEdit(e) {
+  e && e.preventDefault();
+  document.getElementById('slugInput').value = currentSlug;
+  document.getElementById('slugEditMsg').textContent = '';
+  document.getElementById('slugEditWrap').style.display = 'flex';
+  document.getElementById('editSlugBtn').style.display  = 'none';
+  document.getElementById('slugInput').focus();
+}
+
+function hideSlugEdit() {
+  document.getElementById('slugEditWrap').style.display = 'none';
+  document.getElementById('editSlugBtn').style.display  = '';
+}
+
+async function saveSlug() {
+  const val = document.getElementById('slugInput').value.trim().toLowerCase();
+  const msg = document.getElementById('slugEditMsg');
+  msg.style.color = '#f85149';
+  if (val.length < 3 || val.length > 30) {
+    msg.textContent = 'Must be 3–30 characters.';
+    return;
+  }
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(val)) {
+    msg.textContent = 'Letters, numbers, hyphens only; no leading/trailing hyphens.';
+    return;
+  }
+  try {
+    const res = await fetch('/api/profile/slug', {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ slug: val }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error || 'Failed to save.';
+      return;
+    }
+    applySlug(data.slug);
+    msg.style.color = '#3fb950';
+    msg.textContent = '✓ Saved';
+    setTimeout(hideSlugEdit, 800);
+  } catch {
+    msg.textContent = 'Network error.';
+  }
+}
+
+document.getElementById('slugInput')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveSlug();
+  if (e.key === 'Escape') hideSlugEdit();
+});
+
+applySlug(USER_SLUG);
 
 function authHeaders(extra) {
   const h = Object.assign({ 'Content-Type': 'application/json' }, extra);
