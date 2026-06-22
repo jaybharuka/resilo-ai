@@ -99,6 +99,17 @@ func (ae *AlertEngine) Counts() (critical, warning int64) {
 	return ae.criticalCount.Load(), ae.warningCount.Load()
 }
 
+// GetAlertStats returns comprehensive alert statistics for monitoring.
+func (ae *AlertEngine) GetAlertStats() map[string]interface{} {
+	critical, warning := ae.Counts()
+	return map[string]interface{}{
+		"critical_total":    critical,
+		"warning_total":     warning,
+		"active_incidents":  ae.ActiveCount(),
+		"total_alerts":      critical + warning,
+	}
+}
+
 func (ae *AlertEngine) evaluate(m Metrics) {
 	ae.mu.Lock()
 	defer ae.mu.Unlock()
