@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resilo — Sign in</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+      --red:      #f85149;
+      --green:    #3fb950;
+      --font:     'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: .5px;
+      margin-bottom: 8px;
+    }
+    .logo span { color: var(--muted); font-weight: 400; }
+
+    .tagline {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 32px;
+      letter-spacing: .5px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 20px;
+    }
+
+    .error-banner {
+      background: rgba(248,81,73,.12);
+      border: 1px solid rgba(248,81,73,.3);
+      border-radius: 5px;
+      color: var(--red);
+      font-size: 11px;
+      padding: 8px 12px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .error-banner.show { display: block; }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    input[type="email"],
+    input[type="password"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus { border-color: var(--accent); }
+
+    .btn-submit {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: 5px;
+      color: #0d1117;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 20px;
+      padding: 9px;
+      transition: opacity .15s;
+    }
+    .btn-submit:hover { opacity: .88; }
+
+    .footer {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 20px;
+      text-align: center;
+    }
+    .footer a { color: var(--accent); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<div class="logo">Resilo<span>AI</span></div>
+<div class="tagline">AI-powered ops monitoring</div>
+
+<div class="card">
+  <div class="card-title">Sign in to your account</div>
+
+  <div class="error-banner" id="errorBanner">Invalid email or password.</div>
+
+  <form method="post" action="/auth/login">
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="email" autofocus />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password" />
+    </div>
+    <button class="btn-submit" type="submit">Sign in</button>
+  </form>
+
+  <div class="footer">
+    No account? <a href="/signup">Create one</a>
+  </div>
+</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get('error') === 'invalid') {
+    document.getElementById('errorBanner').classList.add('show');
+  }
+</script>
+</body>
+</html>

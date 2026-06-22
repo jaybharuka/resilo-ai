@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -22,6 +23,20 @@ CREATE TABLE IF NOT EXISTS alerts (
   confidence   TEXT,
   fired_at     DATETIME,
   resolved_at  DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  email         TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token      TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
 );`
 
 // Store persists alerts and AI responses to SQLite.
@@ -121,6 +136,79 @@ func (s *Store) UpdateAIResponse(id, rootCause, remediation, confidence string) 
 	if err != nil {
 		slog.Error("store.UpdateAIResponse failed", "id", id, "err", err)
 	}
+}
+
+// User is a registered account.
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+}
+
+// CreateUser inserts a new user and returns the created record.
+func (s *Store) CreateUser(email, passwordHash string) (User, error) {
+	id := GenerateToken()[:16]
+	_, err := s.db.Exec(
+		`INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)`,
+		id, email, passwordHash,
+	)
+	if err != nil {
+		return User{}, fmt.Errorf("create user: %w", err)
+	}
+	return User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now()}, nil
+}
+
+// GetUserByEmail looks up a user by email address.
+func (s *Store) GetUserByEmail(email string) (User, error) {
+	var u User
+	var createdAt string
+	err := s.db.QueryRow(
+		`SELECT id, email, password_hash, created_at FROM users WHERE email = ?`, email,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+	if err != nil {
+		return User{}, err
+	}
+	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return u, nil
+}
+
+// CreateSession generates a token, persists it, and returns the token.
+func (s *Store) CreateSession(userID string) (string, error) {
+	token := GenerateToken()
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	_, err := s.db.Exec(
+		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		token, userID, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+	return token, nil
+}
+
+// GetUserBySession returns the user associated with a non-expired session token.
+func (s *Store) GetUserBySession(token string) (User, error) {
+	var u User
+	var createdAt string
+	err := s.db.QueryRow(`
+		SELECT u.id, u.email, u.password_hash, u.created_at
+		FROM users u
+		JOIN sessions s ON s.user_id = u.id
+		WHERE s.token = ? AND s.expires_at > ?`,
+		token, time.Now().UTC().Format(time.RFC3339),
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+	if err != nil {
+		return User{}, err
+	}
+	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return u, nil
+}
+
+// DeleteSession removes a session token.
+func (s *Store) DeleteSession(token string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+	return err
 }
 
 // QueryAlerts returns up to limit rows, optionally filtered by severity.

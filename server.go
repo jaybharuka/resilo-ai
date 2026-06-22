@@ -2,7 +2,7 @@ package main
 
 import (
 	"compress/gzip"
-	"crypto/rand"
+	crand "crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -149,7 +149,7 @@ func min(a, b float64) float64 {
 // generateRequestID creates a random 8-character hex string for request tracking.
 func generateRequestID() string {
 	bytes := make([]byte, 4)
-	rand.Read(bytes)
+	crand.Read(bytes)
 	return hex.EncodeToString(bytes)
 }
 
@@ -240,6 +240,10 @@ type compressionResponseWriter struct {
 	http.ResponseWriter
 }
 
+func (cw *compressionResponseWriter) Write(b []byte) (int, error) {
+	return cw.Writer.Write(b)
+}
+
 // TriggerRequest is the body for POST /api/trigger.
 type TriggerRequest struct {
 	CPU       bool `json:"cpu"`
@@ -310,6 +314,112 @@ func serveIndex(cfg *Config) http.HandlerFunc {
 		html := strings.Replace(string(body), "</head>", meta+"\n</head>", 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(html))
+	}
+}
+
+// sessionMiddleware checks the session_token cookie and redirects to /login if missing or expired.
+func sessionMiddleware(store *Store, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session_token")
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		if _, err := store.GetUserBySession(cookie.Value); err != nil {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// signupHandler creates a new user account and session.
+func signupHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/signup", http.StatusSeeOther)
+			return
+		}
+		email := strings.TrimSpace(r.FormValue("email"))
+		password := r.FormValue("password")
+		if email == "" || len(password) < 8 {
+			http.Redirect(w, r, "/signup?error=invalid", http.StatusSeeOther)
+			return
+		}
+		hash, err := HashPassword(password)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		user, err := store.CreateUser(email, hash)
+		if err != nil {
+			http.Redirect(w, r, "/signup?error=exists", http.StatusSeeOther)
+			return
+		}
+		token, err := store.CreateSession(user.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			Expires:  time.Now().Add(7 * 24 * time.Hour),
+			SameSite: http.SameSiteLaxMode,
+		})
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	}
+}
+
+// loginHandler verifies credentials and creates a session.
+func loginHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		email := strings.TrimSpace(r.FormValue("email"))
+		password := r.FormValue("password")
+		user, err := store.GetUserByEmail(email)
+		if err != nil || !CheckPassword(user.PasswordHash, password) {
+			http.Redirect(w, r, "/login?error=invalid", http.StatusSeeOther)
+			return
+		}
+		token, err := store.CreateSession(user.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			Expires:  time.Now().Add(7 * 24 * time.Hour),
+			SameSite: http.SameSiteLaxMode,
+		})
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	}
+}
+
+// logoutHandler deletes the session and clears the cookie.
+func logoutHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			store.DeleteSession(cookie.Value)
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:    "session_token",
+			Value:   "",
+			Path:    "/",
+			MaxAge:  -1,
+			Expires: time.Unix(0, 0),
+		})
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
 }
 
@@ -402,16 +512,47 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 		w.Write([]byte("ok"))
 	})
 
-	// Static files — "/" serves index.html with the auth token meta tag injected;
-	// everything else falls through to the plain file server.
-	fileServer := http.FileServer(http.Dir("static"))
-	index := serveIndex(cfg)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			index(w, r)
+	// Auth routes — public, no session required.
+	mux.HandleFunc("/auth/signup", signupHandler(store))
+	mux.HandleFunc("/auth/login", loginHandler(store))
+	mux.HandleFunc("/auth/logout", logoutHandler(store))
+
+	// Login / signup pages.
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/login.html")
+	})
+	mux.HandleFunc("/signup", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/signup.html")
+	})
+
+	// Dashboard — protected by session middleware.
+	mux.HandleFunc("/dashboard", sessionMiddleware(store, func(w http.ResponseWriter, r *http.Request) {
+		body, err := os.ReadFile("static/dashboard.html")
+		if err != nil {
+			http.Error(w, "dashboard not found", http.StatusInternalServerError)
 			return
 		}
-		fileServer.ServeHTTP(w, r)
+		meta := `<meta name="AUTH_TOKEN" content="` + cfg.Auth.Token + `">`
+		html := strings.Replace(string(body), "</head>", meta+"\n</head>", 1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(html))
+	}))
+
+	// Static files — "/" redirects to /dashboard or /login based on session;
+	// other paths fall through to the file server for CSS/JS/assets.
+	fileServer := http.FileServer(http.Dir("static"))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			if _, err := store.GetUserBySession(cookie.Value); err == nil {
+				http.Redirect(w, r, "/dashboard", http.StatusFound)
+				return
+			}
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
 	})
 
 	// WebSocket endpoint
@@ -454,7 +595,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rows)
-	}))
+	})))))
 
 	// POST /api/trigger — spike specific metrics
 	mux.HandleFunc("/api/trigger", compressionMiddleware(loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/trigger", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
@@ -475,7 +616,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 		})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})))
+	}))))))
 
 	// POST /api/reset — clear all triggers
 	mux.HandleFunc("/api/reset", compressionMiddleware(loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/reset", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
@@ -486,7 +627,8 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 		sim.Reset()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
-	})))
+	}))))))
+
 
 	return mux
 }
