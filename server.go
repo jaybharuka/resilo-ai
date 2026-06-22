@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -110,6 +112,8 @@ func (rl *RateLimiter) cleanup() {
 // rateLimitMiddleware wraps a handler with IP-based rate limiting.
 func rateLimitMiddleware(rl *RateLimiter, cfg *Config, route string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		requestID := generateRequestID()
+		
 		if !cfg.RateLimit.Enabled {
 			next(w, r)
 			return
@@ -117,13 +121,14 @@ func rateLimitMiddleware(rl *RateLimiter, cfg *Config, route string, next http.H
 		ip := clientIP(r)
 		ok, retryAfter := rl.allow(ip)
 		if !ok {
-			slog.Warn("rate limit hit", "ip", ip, "route", route)
+			slog.Warn("rate limit hit", "request_id", requestID, "ip", ip, "route", route)
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(map[string]any{
 				"error":                "rate limit exceeded",
 				"retry_after_seconds": retryAfter,
+				"request_id":          requestID,
 			})
 			return
 		}
@@ -137,6 +142,13 @@ func min(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// generateRequestID creates a random 8-character hex string for request tracking.
+func generateRequestID() string {
+	bytes := make([]byte, 4)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
 }
 
 // TriggerRequest is the body for POST /api/trigger.
