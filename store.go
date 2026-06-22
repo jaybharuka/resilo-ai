@@ -68,14 +68,29 @@ func (s *Store) Close() error {
 
 // SaveAlert inserts a new alert row.
 func (s *Store) SaveAlert(a Alert) {
-	_, err := s.db.Exec(
+	if a.ID == "" {
+		slog.Error("store.SaveAlert failed: alert ID cannot be empty")
+		return
+	}
+	if a.Metric == "" {
+		slog.Error("store.SaveAlert failed: metric cannot be empty", "id", a.ID)
+		return
+	}
+	
+	result, err := s.db.Exec(
 		`INSERT OR IGNORE INTO alerts (id, metric, severity, value, threshold, message, fired_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Metric, a.Severity, a.Value, a.Threshold, a.Message,
 		time.UnixMilli(a.Timestamp).UTC().Format(time.RFC3339),
 	)
 	if err != nil {
-		slog.Error("store.SaveAlert failed", "id", a.ID, "err", err)
+		slog.Error("store.SaveAlert failed", "id", a.ID, "metric", a.Metric, "err", err)
+		return
+	}
+	
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		slog.Warn("store.SaveAlert: duplicate alert ignored", "id", a.ID)
 	}
 }
 
