@@ -629,6 +629,123 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
 	}))))))
 
+	// Monitor routes — session-cookie auth.
+	mux.HandleFunc("GET /api/monitors", monitorsListHandler(store))
+	mux.HandleFunc("POST /api/monitors", monitorsCreateHandler(store))
+	mux.HandleFunc("DELETE /api/monitors/{id}", monitorsDeleteHandler(store))
+	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
 
 	return mux
+}
+
+// currentUser extracts the session user from the request cookie.
+// Returns false and writes 401 JSON if the session is missing or expired.
+func currentUser(store *Store, w http.ResponseWriter, r *http.Request) (User, bool) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return User{}, false
+	}
+	user, err := store.GetUserBySession(cookie.Value)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return User{}, false
+	}
+	return user, true
+}
+
+func monitorsListHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		monitors, err := store.GetMonitorsByUser(user.ID)
+		if err != nil {
+			slog.Error("GetMonitorsByUser failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if monitors == nil {
+			monitors = []Monitor{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(monitors)
+	}
+}
+
+func monitorsCreateHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			Name            string `json:"name"`
+			URL             string `json:"url"`
+			IntervalSeconds int    `json:"interval_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" || req.URL == "" {
+			http.Error(w, "name and url are required", http.StatusBadRequest)
+			return
+		}
+		if req.IntervalSeconds <= 0 {
+			req.IntervalSeconds = 60
+		}
+		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.IntervalSeconds)
+		if err != nil {
+			slog.Error("CreateMonitor failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(m)
+	}
+}
+
+func monitorsDeleteHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		id := r.PathValue("id")
+		if err := store.DeleteMonitor(id, user.ID); err != nil {
+			slog.Error("DeleteMonitor failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	}
+}
+
+func monitorsResultsHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		id := r.PathValue("id")
+		results, err := store.GetRecentResults(id, 50)
+		if err != nil {
+			slog.Error("GetRecentResults failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if results == nil {
+			results = []MonitorResult{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+	}
 }

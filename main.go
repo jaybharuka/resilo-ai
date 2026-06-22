@@ -51,6 +51,8 @@ func main() {
 	alertEngine := newAlertEngine(hub, sim, claude, store, cfg)
 	go alertEngine.Run()
 
+	checker := newChecker(store)
+
 	// Fan-out simulator metrics to WebSocket clients.
 	go func() {
 		for m := range metricsCh {
@@ -72,6 +74,8 @@ func main() {
 	// Block until SIGTERM or SIGINT is received.
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+
+	go checker.Run(sigCtx)
 
 	go func() {
 		slog.Info("aiops-bot starting", "addr", bindAddr)

@@ -37,6 +37,27 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id    TEXT NOT NULL,
   expires_at DATETIME NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS monitors (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  name             TEXT NOT NULL,
+  url              TEXT NOT NULL,
+  interval_seconds INTEGER DEFAULT 60,
+  enabled          INTEGER DEFAULT 1,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS monitor_results (
+  id          TEXT PRIMARY KEY,
+  monitor_id  TEXT NOT NULL,
+  status_code INTEGER,
+  latency_ms  INTEGER,
+  error       TEXT,
+  checked_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (monitor_id) REFERENCES monitors(id)
 );`
 
 // Store persists alerts and AI responses to SQLite.
@@ -209,6 +230,143 @@ func (s *Store) GetUserBySession(token string) (User, error) {
 func (s *Store) DeleteSession(token string) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
 	return err
+}
+
+// Monitor is a URL the user wants to check on a schedule.
+type Monitor struct {
+	ID              string  `json:"id"`
+	UserID          string  `json:"user_id"`
+	Name            string  `json:"name"`
+	URL             string  `json:"url"`
+	IntervalSeconds int     `json:"interval_seconds"`
+	Enabled         bool    `json:"enabled"`
+	CreatedAt       string  `json:"created_at"`
+	LastStatus      *int    `json:"last_status"`
+	LastLatencyMs   *int    `json:"last_latency_ms"`
+	LastError       *string `json:"last_error"`
+	LastCheckedAt   *string `json:"last_checked_at"`
+}
+
+// MonitorResult is one check outcome for a monitor.
+type MonitorResult struct {
+	ID         string  `json:"id"`
+	MonitorID  string  `json:"monitor_id"`
+	StatusCode *int    `json:"status_code"`
+	LatencyMs  *int    `json:"latency_ms"`
+	Error      *string `json:"error"`
+	CheckedAt  string  `json:"checked_at"`
+}
+
+// CreateMonitor inserts a new monitor row.
+func (s *Store) CreateMonitor(userID, name, url string, intervalSeconds int) (Monitor, error) {
+	id := GenerateToken()[:16]
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`INSERT INTO monitors (id, user_id, name, url, interval_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, userID, name, url, intervalSeconds, now,
+	)
+	if err != nil {
+		return Monitor{}, fmt.Errorf("create monitor: %w", err)
+	}
+	return Monitor{ID: id, UserID: userID, Name: name, URL: url, IntervalSeconds: intervalSeconds, Enabled: true, CreatedAt: now}, nil
+}
+
+// GetMonitorsByUser returns all monitors for a user with the latest result joined.
+func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
+	rows, err := s.db.Query(`
+		SELECT m.id, m.user_id, m.name, m.url, m.interval_seconds, m.enabled, m.created_at,
+		       r.status_code, r.latency_ms, r.error, r.checked_at
+		FROM monitors m
+		LEFT JOIN monitor_results r ON r.id = (
+		    SELECT id FROM monitor_results WHERE monitor_id = m.id ORDER BY checked_at DESC LIMIT 1
+		)
+		WHERE m.user_id = ?
+		ORDER BY m.created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []Monitor
+	for rows.Next() {
+		var m Monitor
+		var enabled int
+		if err := rows.Scan(
+			&m.ID, &m.UserID, &m.Name, &m.URL, &m.IntervalSeconds, &enabled, &m.CreatedAt,
+			&m.LastStatus, &m.LastLatencyMs, &m.LastError, &m.LastCheckedAt,
+		); err != nil {
+			return nil, err
+		}
+		m.Enabled = enabled == 1
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
+// GetAllEnabledMonitors returns all enabled monitors across all users (used by checker).
+func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
+	rows, err := s.db.Query(`
+		SELECT id, user_id, name, url, interval_seconds, enabled, created_at
+		FROM monitors WHERE enabled = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []Monitor
+	for rows.Next() {
+		var m Monitor
+		var enabled int
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.URL, &m.IntervalSeconds, &enabled, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		m.Enabled = enabled == 1
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
+// DeleteMonitor removes a monitor owned by the given user.
+func (s *Store) DeleteMonitor(id, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM monitors WHERE id = ? AND user_id = ?`, id, userID)
+	return err
+}
+
+// SaveResult inserts a new check result for a monitor.
+func (s *Store) SaveResult(monitorID string, statusCode, latencyMs int, errStr string) error {
+	id := GenerateToken()[:16]
+	now := time.Now().UTC().Format(time.RFC3339)
+	var errVal interface{}
+	if errStr != "" {
+		errVal = errStr
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO monitor_results (id, monitor_id, status_code, latency_ms, error, checked_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, monitorID, statusCode, latencyMs, errVal, now,
+	)
+	return err
+}
+
+// GetRecentResults returns the most recent results for a monitor.
+func (s *Store) GetRecentResults(monitorID string, limit int) ([]MonitorResult, error) {
+	rows, err := s.db.Query(`
+		SELECT id, monitor_id, status_code, latency_ms, error, checked_at
+		FROM monitor_results WHERE monitor_id = ?
+		ORDER BY checked_at DESC LIMIT ?`, monitorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []MonitorResult
+	for rows.Next() {
+		var r MonitorResult
+		if err := rows.Scan(&r.ID, &r.MonitorID, &r.StatusCode, &r.LatencyMs, &r.Error, &r.CheckedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
 }
 
 // QueryAlerts returns up to limit rows, optionally filtered by severity.
