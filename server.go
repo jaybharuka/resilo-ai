@@ -151,6 +151,22 @@ func generateRequestID() string {
 	return hex.EncodeToString(bytes)
 }
 
+// corsMiddleware adds CORS headers for API endpoints.
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next(w, r)
+	}
+}
+
 // TriggerRequest is the body for POST /api/trigger.
 type TriggerRequest struct {
 	CPU       bool `json:"cpu"`
@@ -342,7 +358,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	})))
 
 	// GET /api/alerts — query persisted alerts with optional limit and severity filter
-	mux.HandleFunc("/api/alerts", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/alerts", corsMiddleware(authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -368,7 +384,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	}))
 
 	// POST /api/trigger — spike specific metrics
-	mux.HandleFunc("/api/trigger", rateLimitMiddleware(rl, cfg, "/api/trigger", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/trigger", corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/trigger", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -389,7 +405,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	})))
 
 	// POST /api/reset — clear all triggers
-	mux.HandleFunc("/api/reset", rateLimitMiddleware(rl, cfg, "/api/reset", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/reset", corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/reset", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
