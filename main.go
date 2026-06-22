@@ -84,20 +84,27 @@ func main() {
 	<-sigCtx.Done()
 	stop() // release signal resources before doing blocking work
 
-	slog.Info("shutdown signal received")
+	slog.Info("shutdown signal received, initiating graceful shutdown")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Create shutdown context with extended timeout for large responses
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Shutdown HTTP server with detailed logging
+	slog.Info("shutting down HTTP server...")
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("http shutdown error", "err", err)
+		slog.Error("HTTP server shutdown error", "err", err)
+	} else {
+		slog.Info("HTTP server stopped gracefully")
 	}
-	slog.Info("http server stopped")
 
+	// Close database connection with detailed logging
+	slog.Info("closing database connection...")
 	if err := store.Close(); err != nil {
-		slog.Error("store close error", "err", err)
+		slog.Error("database close error", "err", err)
+	} else {
+		slog.Info("database connection closed")
 	}
-	slog.Info("store closed")
 
-	slog.Info("shutdown complete")
+	slog.Info("graceful shutdown complete")
 }
