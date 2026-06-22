@@ -53,16 +53,23 @@ func (h *Hub) run() {
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
+			sent := 0
+			dropped := 0
 			for client := range h.clients {
 				select {
 				case client.send <- msg:
+					sent++
 				default:
 					// slow client — drop and close
 					close(client.send)
 					delete(h.clients, client)
+					dropped++
 				}
 			}
 			h.mu.RUnlock()
+			if dropped > 0 {
+				slog.Warn("ws broadcast dropped slow clients", "sent", sent, "dropped", dropped, "remaining", len(h.clients))
+			}
 		}
 	}
 }
