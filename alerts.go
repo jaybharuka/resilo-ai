@@ -71,6 +71,11 @@ type AlertEngine struct {
 }
 
 func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store, cfg *Config) *AlertEngine {
+	// Validate alert thresholds
+	if err := validateAlertConfig(cfg.Alerts); err != nil {
+		slog.Error("invalid alert configuration", "err", err)
+	}
+	
 	return &AlertEngine{
 		hub:          hub,
 		sim:          sim,
@@ -79,6 +84,55 @@ func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store
 		cfg:          cfg,
 		activeAlerts: make(map[string]activeAlert),
 	}
+}
+
+// validateAlertConfig checks that alert thresholds are sensible.
+func validateAlertConfig(a AlertsConfig) error {
+	if a.CPUWarning <= 0 || a.CPUWarning > 100 {
+		return fmt.Errorf("CPU warning threshold must be between 0-100, got %f", a.CPUWarning)
+	}
+	if a.CPUCritical <= 0 || a.CPUCritical > 100 {
+		return fmt.Errorf("CPU critical threshold must be between 0-100, got %f", a.CPUCritical)
+	}
+	if a.CPUCritical <= a.CPUWarning {
+		return fmt.Errorf("CPU critical threshold (%f) must be greater than warning (%f)", a.CPUCritical, a.CPUWarning)
+	}
+	
+	if a.MemoryWarning <= 0 || a.MemoryWarning > 100 {
+		return fmt.Errorf("Memory warning threshold must be between 0-100, got %f", a.MemoryWarning)
+	}
+	if a.MemoryCritical <= 0 || a.MemoryCritical > 100 {
+		return fmt.Errorf("Memory critical threshold must be between 0-100, got %f", a.MemoryCritical)
+	}
+	if a.MemoryCritical <= a.MemoryWarning {
+		return fmt.Errorf("Memory critical threshold (%f) must be greater than warning (%f)", a.MemoryCritical, a.MemoryWarning)
+	}
+	
+	if a.LatencyWarningMs <= 0 {
+		return fmt.Errorf("Latency warning threshold must be positive, got %f", a.LatencyWarningMs)
+	}
+	if a.LatencyCriticalMs <= 0 {
+		return fmt.Errorf("Latency critical threshold must be positive, got %f", a.LatencyCriticalMs)
+	}
+	if a.LatencyCriticalMs <= a.LatencyWarningMs {
+		return fmt.Errorf("Latency critical threshold (%f) must be greater than warning (%f)", a.LatencyCriticalMs, a.LatencyWarningMs)
+	}
+	
+	if a.ErrorWarning <= 0 || a.ErrorWarning > 100 {
+		return fmt.Errorf("Error warning threshold must be between 0-100, got %f", a.ErrorWarning)
+	}
+	if a.ErrorCritical <= 0 || a.ErrorCritical > 100 {
+		return fmt.Errorf("Error critical threshold must be between 0-100, got %f", a.ErrorCritical)
+	}
+	if a.ErrorCritical <= a.ErrorWarning {
+		return fmt.Errorf("Error critical threshold (%f) must be greater than warning (%f)", a.ErrorCritical, a.ErrorWarning)
+	}
+	
+	if a.CooldownSeconds <= 0 {
+		return fmt.Errorf("Cooldown seconds must be positive, got %d", a.CooldownSeconds)
+	}
+	
+	return nil
 }
 
 // ActiveCount returns the number of currently open (unresolved) incidents.
