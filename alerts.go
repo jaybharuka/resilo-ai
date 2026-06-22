@@ -290,20 +290,42 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 
 func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics) {
 	if ae.claudeAPI == nil {
-		return
-	}
-	resp, err := ae.claudeAPI.Analyze(alert, m)
-	if err != nil {
-		slog.Error("AI analysis failed", "alert_id", alert.ID, "err", err)
+		// Broadcast a fallback response when AI is disabled
+		fallback := map[string]interface{}{
+			"alert_id": alert.ID,
+			"model":    "disabled",
+			"root_cause": "AI analysis is disabled",
+			"remediation": "Check system metrics manually and investigate the alert condition",
+			"confidence": "none",
+			"timestamp": time.Now().UnixMilli(),
+		}
 		ae.hub.broadcastJSON(WSMessage{
-			Type: "ai_response",
-			Payload: map[string]interface{}{
-				"alert_id": alert.ID,
-				"error":    err.Error(),
-			},
+			Type:    "ai_response",
+			Payload: fallback,
 		})
 		return
 	}
+	
+	resp, err := ae.claudeAPI.Analyze(alert, m)
+	if err != nil {
+		slog.Error("AI analysis failed", "alert_id", alert.ID, "err", err)
+		
+		// Broadcast a fallback response when AI fails
+		fallback := map[string]interface{}{
+			"alert_id": alert.ID,
+			"model":    ae.claudeAPI.getModel(),
+			"root_cause": fmt.Sprintf("AI analysis failed: %s", err.Error()),
+			"remediation": "Check system metrics manually and investigate the alert condition",
+			"confidence": "none",
+			"timestamp": time.Now().UnixMilli(),
+		}
+		ae.hub.broadcastJSON(WSMessage{
+			Type:    "ai_response",
+			Payload: fallback,
+		})
+		return
+	}
+	
 	slog.Info("AI analysis ready", "alert_id", alert.ID, "confidence", resp.Confidence)
 	if ae.store != nil {
 		ae.store.UpdateAIResponse(resp.AlertID, resp.RootCause, resp.Remediation, resp.Confidence)

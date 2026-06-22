@@ -44,6 +44,11 @@ func newClaudeClient(cfg *Config) *ClaudeClient {
 	}
 }
 
+// getModel returns the configured model name.
+func (c *ClaudeClient) getModel() string {
+	return c.model
+}
+
 type chatCompletionRequest struct {
 	Model       string        `json:"model"`
 	Messages    []chatMessage `json:"messages"`
