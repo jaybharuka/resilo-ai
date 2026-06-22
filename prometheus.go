@@ -11,10 +11,15 @@ import (
 )
 
 // promQueries maps each metric name to its PromQL expression.
+// These queries expect a standard Prometheus node_exporter and http metrics setup.
 var promQueries = map[string]string{
-	"cpu":    `100-(avg(rate(node_cpu_seconds_total{mode="idle"}[1m]))*100)`,
+	// CPU: Non-idle percentage across all cores (1m average)
+	"cpu": `100-(avg(rate(node_cpu_seconds_total{mode="idle"}[1m]))*100)`,
+	// Memory: Percentage of used memory (1 - available/total)
 	"memory": `(1-(node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes))*100`,
+	// Latency: 99th percentile HTTP request duration in milliseconds
 	"latency": `histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[1m]))*1000`,
+	// Errors: 5xx response rate as percentage of total requests
 	"errors": `rate(http_requests_total{status=~"5.."}[1m])/rate(http_requests_total[1m])*100`,
 }
 
