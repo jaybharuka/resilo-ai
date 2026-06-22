@@ -129,20 +129,47 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// Validate critical configuration
-	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
-		return nil, fmt.Errorf("invalid server port: %d", cfg.Server.Port)
-	}
-	if cfg.Store.Path == "" {
-		return nil, fmt.Errorf("store path cannot be empty")
-	}
-	if cfg.RateLimit.Enabled {
-		if cfg.RateLimit.RequestsPerMinute <= 0 {
-			return nil, fmt.Errorf("rate limit requests per minute must be positive")
-		}
-		if cfg.RateLimit.Burst <= 0 {
-			return nil, fmt.Errorf("rate limit burst must be positive")
-		}
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
 	}
 	
 	return cfg, nil
+}
+
+// validateConfig performs comprehensive configuration validation.
+func validateConfig(cfg *Config) error {
+	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
+	}
+	if cfg.Store.Path == "" {
+		return fmt.Errorf("store path cannot be empty")
+	}
+	if cfg.RateLimit.Enabled {
+		if cfg.RateLimit.RequestsPerMinute <= 0 {
+			return fmt.Errorf("rate limit requests per minute must be positive")
+		}
+		if cfg.RateLimit.Burst <= 0 {
+			return fmt.Errorf("rate limit burst must be positive")
+		}
+	}
+	return nil
+}
+
+// ReloadConfig reloads configuration from the same path and applies changes.
+// Note: Some changes (like server port) require restart to take effect.
+func ReloadConfig(cfg *Config, path string) error {
+	newCfg, err := LoadConfig(path)
+	if err != nil {
+		return err
+	}
+	
+	// Update mutable fields
+	cfg.Prometheus = newCfg.Prometheus
+	cfg.AI = newCfg.AI
+	cfg.Auth = newCfg.Auth
+	cfg.RateLimit = newCfg.RateLimit
+	cfg.Alerts = newCfg.Alerts
+	
+	slog.Info("configuration reloaded", "path", path)
+	return nil
 }
