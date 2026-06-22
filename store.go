@@ -223,6 +223,7 @@ type User struct {
 }
 
 // deriveSlug converts an email address to a URL-safe slug using the local part.
+// Trailing digits are stripped so jaybharuka7@gmail.com → base "jaybharuka".
 func deriveSlug(email string) string {
 	prefix := email
 	if i := strings.Index(email, "@"); i > 0 {
@@ -237,6 +238,9 @@ func deriveSlug(email string) string {
 		}
 	}
 	s := strings.Trim(b.String(), "-")
+	// Strip trailing digits (e.g. "jaybharuka7" → "jaybharuka").
+	s = strings.TrimRight(s, "0123456789")
+	s = strings.TrimRight(s, "-")
 	if s == "" {
 		return "user"
 	}
@@ -269,6 +273,21 @@ func (s *Store) uniqueSlug(base string) string {
 		candidate = fmt.Sprintf("%s-%d", base, i)
 	}
 	return base + "-" + GenerateToken()[:6]
+}
+
+// UpdateUserSlug sets a new slug for a user.
+func (s *Store) UpdateUserSlug(userID, slug string) error {
+	_, err := s.db.Exec(`UPDATE users SET slug = ? WHERE id = ?`, slug, userID)
+	return err
+}
+
+// IsSlugAvailable reports whether a slug is not in use by any user other than excludeUserID.
+func (s *Store) IsSlugAvailable(slug, excludeUserID string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM users WHERE slug = ? AND id != ?`, slug, excludeUserID,
+	).Scan(&count)
+	return count == 0, err
 }
 
 // GetUserByEmail looks up a user by email address.

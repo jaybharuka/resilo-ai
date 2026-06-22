@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -643,6 +644,9 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/outages", monitorsOutagesHandler(store))
 
+	// Profile routes — session-cookie auth.
+	mux.HandleFunc("PUT /api/profile/slug", profileSlugHandler(store))
+
 	// Public status page — no auth required.
 	mux.HandleFunc("GET /status/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/status.html")
@@ -867,5 +871,62 @@ func statusDataHandler(store *Store) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(data)
+	}
+}
+
+var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
+func profileSlugHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+
+		var body struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+			return
+		}
+
+		slug := strings.ToLower(strings.TrimSpace(body.Slug))
+		if len(slug) < 3 || len(slug) > 30 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "slug must be 3–30 characters"})
+			return
+		}
+		if !validSlugRe.MatchString(slug) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "letters, numbers, and hyphens only; cannot start or end with a hyphen"})
+			return
+		}
+
+		available, err := store.IsSlugAvailable(slug, user.ID)
+		if err != nil {
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if !available {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": "that slug is already taken"})
+			return
+		}
+
+		if err := store.UpdateUserSlug(user.ID, slug); err != nil {
+			slog.Error("UpdateUserSlug failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+
+		slog.Info("slug updated", "user_id", user.ID, "slug", slug)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"slug": slug})
 	}
 }
