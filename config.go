@@ -173,3 +173,36 @@ func ReloadConfig(cfg *Config, path string) error {
 	slog.Info("configuration reloaded", "path", path)
 	return nil
 }
+
+// ValidateEnvironment checks critical environment variables and logs warnings.
+func ValidateEnvironment() {
+	// Check for common configuration issues
+	if os.Getenv("PROMETHEUS_URL") != "" {
+		if !strings.HasPrefix(os.Getenv("PROMETHEUS_URL"), "http://") && 
+		   !strings.HasPrefix(os.Getenv("PROMETHEUS_URL"), "https://") {
+			slog.Warn("PROMETHEUS_URL should include protocol (http:// or https://)")
+		}
+	}
+	
+	provider := os.Getenv("AI_PROVIDER")
+	if provider != "" {
+		provider = strings.ToLower(provider)
+		if provider != "nvidia" && provider != "anthropic" {
+			slog.Warn("AI_PROVIDER should be 'nvidia' or 'anthropic'", "provider", provider)
+		}
+	}
+	
+	if os.Getenv("AUTH_TOKEN") != "" {
+		token := os.Getenv("AUTH_TOKEN")
+		if len(token) < 16 {
+			slog.Warn("AUTH_TOKEN should be at least 16 characters for security")
+		}
+	}
+	
+	// Log configuration summary
+	slog.Info("environment validation complete",
+		"prometheus_url_set", os.Getenv("PROMETHEUS_URL") != "",
+		"ai_provider", provider,
+		"auth_token_set", os.Getenv("AUTH_TOKEN") != "",
+	)
+}
