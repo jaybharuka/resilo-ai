@@ -51,11 +51,18 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	
+	// Configure connection pool for better performance
+	db.SetMaxOpenConns(10)        // Maximum number of open connections
+	db.SetMaxIdleConns(5)         // Maximum number of idle connections
+	db.SetConnMaxLifetime(0)     // Connections are reused forever (0 = unlimited)
+	db.SetConnMaxIdleTime(300)   // Maximum time a connection can be idle (5 minutes)
+	
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	slog.Info("store opened", "path", path)
+	slog.Info("store opened", "path", path, "max_open_conns", 10, "max_idle_conns", 5)
 	return &Store{db: db}, nil
 }
 
