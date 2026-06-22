@@ -151,6 +151,7 @@ type TriggerRequest struct {
 type HealthResponse struct {
 	Status        string         `json:"status"`
 	UptimeSeconds int64          `json:"uptime_seconds"`
+	Database      string         `json:"database"`
 	Metrics       HealthMetrics  `json:"metrics"`
 }
 
@@ -263,9 +264,18 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	// GET /health — machine-readable status with uptime and current metrics
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		m := sim.Current()
+		
+		// Check database connectivity
+		dbStatus := "ok"
+		if err := store.db.Ping(); err != nil {
+			dbStatus = "error"
+			slog.Error("health check: database ping failed", "err", err)
+		}
+		
 		body := HealthResponse{
 			Status:        "ok",
 			UptimeSeconds: int64(time.Since(startTime).Seconds()),
+			Database:      dbStatus,
 			Metrics: HealthMetrics{
 				CPU:       math.Round(m.CPU*100) / 100,
 				Memory:    math.Round(m.Memory*100) / 100,
