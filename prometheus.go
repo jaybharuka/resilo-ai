@@ -61,37 +61,44 @@ func NewPrometheusClient(baseURL string) *PrometheusClient {
 // queryOne runs a single instant PromQL query and returns the scalar result.
 // Returns -1 if the result is empty or cannot be parsed.
 func (p *PrometheusClient) queryOne(query string) float64 {
-	endpoint := fmt.Sprintf("%s/api/v1/query?query=%s", p.baseURL, url.QueryEscape(query))
-	resp, err := p.httpClient.Get(endpoint)
-	if err != nil {
-		return -1
-	}
-	defer resp.Body.Close()
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+		
+		endpoint := fmt.Sprintf("%s/api/v1/query?query=%s", p.baseURL, url.QueryEscape(query))
+		resp, err := p.httpClient.Get(endpoint)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return -1
-	}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			continue
+		}
 
-	var pr promResponse
-	if err := json.Unmarshal(body, &pr); err != nil {
-		return -1
-	}
-	if pr.Status != "success" || len(pr.Data.Result) == 0 {
-		return -1
-	}
+		var pr promResponse
+		if err := json.Unmarshal(body, &pr); err != nil {
+			continue
+		}
+		if pr.Status != "success" || len(pr.Data.Result) == 0 {
+			return -1
+		}
 
-	// value[1] is the string-encoded float
-	raw := pr.Data.Result[0].Value[1]
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return -1
+		// value[1] is the string-encoded float
+		raw := pr.Data.Result[0].Value[1]
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			continue
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			continue
+		}
+		return v
 	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return -1
-	}
-	return v
+	return -1
 }
 
 // Fetch queries all four metrics concurrently and returns a MetricSnapshot.
