@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Status — Resilo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Header ── */
+    .site-header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .site-header .logo {
+      font-size: 13px;
+      font-weight: 600;
+      color: #8b949e;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+    }
+    .site-header .sep { color: #30363d; }
+    .site-header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #e6edf3;
+    }
+    .header-right { margin-left: auto; font-size: 12px; color: #8b949e; }
+
+    /* ── Overall status banner ── */
+    .banner {
+      margin: 24px auto;
+      max-width: 820px;
+      width: 100%;
+      padding: 0 20px;
+    }
+    .banner-inner {
+      border-radius: 10px;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .banner-inner.operational { background: #1b2d1f; border: 1px solid #238636; color: #3fb950; }
+    .banner-inner.partial     { background: #271f1b; border: 1px solid #9e6a03; color: #d29922; }
+    .banner-inner.major       { background: #2d1b1b; border: 1px solid #8b1a1a; color: #f85149; }
+    .banner-inner .dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .banner-inner.operational .dot { background: #3fb950; box-shadow: 0 0 8px #3fb95080; }
+    .banner-inner.partial     .dot { background: #d29922; box-shadow: 0 0 8px #d2992280; }
+    .banner-inner.major       .dot { background: #f85149; box-shadow: 0 0 8px #f8514980; }
+
+    /* ── Monitor list ── */
+    .monitor-list {
+      max-width: 820px;
+      width: 100%;
+      margin: 0 auto 32px;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .monitor-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .monitor-top {
+      display: flex;
+      align-items: center;
+      padding: 14px 18px;
+      gap: 14px;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 5px;
+      flex-shrink: 0;
+    }
+    .badge.up   { background: #1b2d1f; color: #3fb950; border: 1px solid #238636; }
+    .badge.down { background: #2d1b1b; color: #f85149; border: 1px solid #8b1a1a; }
+    .badge.unknown { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+
+    .monitor-name {
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+    .monitor-url {
+      font-size: 11px;
+      color: #8b949e;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 260px;
+    }
+    .monitor-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 11px;
+      color: #8b949e;
+      flex-shrink: 0;
+    }
+    .uptime-pct { font-weight: 600; color: #e6edf3; }
+    .latency-val { font-variant-numeric: tabular-nums; }
+
+    /* ── 30-day uptime bar ── */
+    .uptime-bar-wrap {
+      padding: 0 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .uptime-bar {
+      display: flex;
+      gap: 2px;
+    }
+    .uptime-bar .day-block {
+      flex: 1;
+      height: 28px;
+      border-radius: 3px;
+      cursor: default;
+      position: relative;
+    }
+    .uptime-bar .day-block.green { background: #238636; }
+    .uptime-bar .day-block.yellow { background: #9e6a03; }
+    .uptime-bar .day-block.red   { background: #8b1a1a; }
+    .uptime-bar .day-block.gray  { background: #21262d; }
+
+    /* tooltip */
+    .uptime-bar .day-block::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1c2128;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      font-size: 10px;
+      white-space: nowrap;
+      padding: 3px 7px;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .15s;
+      z-index: 10;
+    }
+    .uptime-bar .day-block:hover::after { opacity: 1; }
+
+    .bar-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #8b949e;
+    }
+
+    /* ── Last checked ── */
+    .last-checked {
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    /* ── Empty / loading state ── */
+    .state-msg {
+      max-width: 820px;
+      margin: 60px auto;
+      text-align: center;
+      color: #8b949e;
+      font-size: 14px;
+      padding: 0 20px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: auto;
+      text-align: center;
+      padding: 24px 20px;
+      font-size: 11px;
+      color: #8b949e;
+      border-top: 1px solid #21262d;
+    }
+    footer a { color: #58a6ff; }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <span class="logo">Resilo</span>
+  <span class="sep">›</span>
+  <h1 id="pageTitle">Status Page</h1>
+  <span class="header-right" id="lastUpdatedEl"></span>
+</header>
+
+<div class="banner" id="bannerWrap">
+  <div class="banner-inner operational" id="bannerEl">
+    <span class="dot"></span>
+    <span id="bannerText">Loading…</span>
+  </div>
+</div>
+
+<div class="monitor-list" id="monitorList">
+  <div class="state-msg" id="stateMsg">Loading status…</div>
+</div>
+
+<footer>Powered by <a href="https://resilo-ai.fly.dev">Resilo</a></footer>
+
+<script>
+const slug = location.pathname.replace('/status/', '').replace(/\/+$/, '');
+
+function relTime(iso) {
+  if (!iso) return '—';
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+
+function dayColor(pct) {
+  if (pct < 0)   return 'gray';
+  if (pct >= 95) return 'green';
+  if (pct >= 50) return 'yellow';
+  return 'red';
+}
+
+function buildDayBar(dailyUptime) {
+  const bar = document.createElement('div');
+  bar.className = 'uptime-bar';
+  const now = new Date();
+  dailyUptime.forEach((pct, i) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - (dailyUptime.length - 1 - i));
+    const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const tip = pct < 0 ? `${label}: no data` : `${label}: ${pct.toFixed(1)}%`;
+    const block = document.createElement('div');
+    block.className = `day-block ${dayColor(pct)}`;
+    block.setAttribute('data-tip', tip);
+    bar.appendChild(block);
+  });
+  return bar;
+}
+
+function renderData(data) {
+  // Update title
+  document.title = `${data.slug} — System Status`;
+  document.getElementById('pageTitle').textContent = `${data.slug} — Status`;
+
+  // Update last-updated
+  const updated = new Date(data.last_updated);
+  document.getElementById('lastUpdatedEl').textContent =
+    `Updated ${updated.toLocaleTimeString()}`;
+
+  // Banner
+  const banner = document.getElementById('bannerEl');
+  const bannerText = document.getElementById('bannerText');
+  banner.className = `banner-inner ${data.overall_status}`;
+  bannerText.textContent = {
+    operational: 'All Systems Operational',
+    partial:     'Partial Outage',
+    major:       'Major Outage',
+  }[data.overall_status] || data.overall_status;
+
+  // Monitors
+  const list = document.getElementById('monitorList');
+  list.innerHTML = '';
+
+  if (!data.monitors || data.monitors.length === 0) {
+    list.innerHTML = '<div class="state-msg">No monitors configured for this page.</div>';
+    return;
+  }
+
+  data.monitors.forEach(m => {
+    const card = document.createElement('div');
+    card.className = 'monitor-card';
+
+    const statusClass = m.status === 'up' ? 'up' : m.status === 'down' ? 'down' : 'unknown';
+    const statusLabel = m.status === 'up' ? 'UP' : m.status === 'down' ? 'DOWN' : '—';
+    const latency = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : '—';
+
+    const top = document.createElement('div');
+    top.className = 'monitor-top';
+    top.innerHTML = `
+      <span class="badge ${statusClass}">${statusLabel}</span>
+      <div style="flex:1;min-width:0;">
+        <div class="monitor-name">${esc(m.name)}</div>
+        <a class="monitor-url" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)}</a>
+      </div>
+      <div class="monitor-meta">
+        <span><span class="uptime-pct">${m.uptime_percent.toFixed(2)}%</span> <span style="font-size:10px;">7d uptime</span></span>
+        <span class="latency-val">${latency}</span>
+        <span class="last-checked">${relTime(m.last_checked_at)}</span>
+      </div>
+    `;
+    card.appendChild(top);
+
+    if (m.daily_uptime && m.daily_uptime.length > 0) {
+      const wrap = document.createElement('div');
+      wrap.className = 'uptime-bar-wrap';
+      wrap.appendChild(buildDayBar(m.daily_uptime));
+      const labels = document.createElement('div');
+      labels.className = 'bar-labels';
+      labels.innerHTML = '<span>30 days ago</span><span>Today</span>';
+      wrap.appendChild(labels);
+      card.appendChild(wrap);
+    }
+
+    list.appendChild(card);
+  });
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&#34;');
+}
+
+async function load() {
+  try {
+    const res = await fetch(`/api/status/${slug}`);
+    if (!res.ok) {
+      document.getElementById('stateMsg').textContent =
+        res.status === 404 ? 'Status page not found.' : 'Failed to load status data.';
+      return;
+    }
+    const data = await res.json();
+    renderData(data);
+  } catch (e) {
+    document.getElementById('stateMsg').textContent = 'Failed to load status data.';
+  }
+}
+
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>

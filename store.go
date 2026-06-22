@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,6 +111,47 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+
+	// Migration: add slug column to users if it doesn't exist.
+	var hasSlug bool
+	pragmaRows, err := db.Query(`PRAGMA table_info(users)`)
+	if err == nil {
+		for pragmaRows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if pragmaRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil && name == "slug" {
+				hasSlug = true
+			}
+		}
+		pragmaRows.Close()
+	}
+	if !hasSlug {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN slug TEXT`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate users.slug: %w", err)
+		}
+		// Backfill slugs for any existing users.
+		backfillRows, backfillErr := db.Query(`SELECT id, email FROM users WHERE slug IS NULL OR slug = ''`)
+		if backfillErr == nil {
+			type row struct{ id, email string }
+			var pending []row
+			for backfillRows.Next() {
+				var r row
+				backfillRows.Scan(&r.id, &r.email)
+				pending = append(pending, r)
+			}
+			backfillRows.Close()
+			for _, r := range pending {
+				slug := deriveSlug(r.email)
+				// Make unique by appending first 4 chars of the user id.
+				slug = slug + "-" + r.id[:4]
+				db.Exec(`UPDATE users SET slug = ? WHERE id = ?`, slug, r.id)
+			}
+		}
+		slog.Info("store: migrated users.slug column")
+	}
+
 	slog.Info("store opened", "path", path, "max_open_conns", 10, "max_idle_conns", 5)
 	return &Store{db: db}, nil
 }
@@ -176,20 +218,57 @@ type User struct {
 	ID           string
 	Email        string
 	PasswordHash string
+	Slug         string
 	CreatedAt    time.Time
+}
+
+// deriveSlug converts an email address to a URL-safe slug using the local part.
+func deriveSlug(email string) string {
+	prefix := email
+	if i := strings.Index(email, "@"); i > 0 {
+		prefix = email[:i]
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(prefix) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "user"
+	}
+	return s
 }
 
 // CreateUser inserts a new user and returns the created record.
 func (s *Store) CreateUser(email, passwordHash string) (User, error) {
 	id := GenerateToken()[:16]
+	slug := s.uniqueSlug(deriveSlug(email))
 	_, err := s.db.Exec(
-		`INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)`,
-		id, email, passwordHash,
+		`INSERT INTO users (id, email, password_hash, slug) VALUES (?, ?, ?, ?)`,
+		id, email, passwordHash, slug,
 	)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
-	return User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now()}, nil
+	return User{ID: id, Email: email, PasswordHash: passwordHash, Slug: slug, CreatedAt: time.Now()}, nil
+}
+
+// uniqueSlug returns base if it's free, otherwise base-2, base-3, etc.
+func (s *Store) uniqueSlug(base string) string {
+	candidate := base
+	for i := 2; i <= 999; i++ {
+		var count int
+		s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE slug = ?`, candidate).Scan(&count)
+		if count == 0 {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i)
+	}
+	return base + "-" + GenerateToken()[:6]
 }
 
 // GetUserByEmail looks up a user by email address.
@@ -197,8 +276,8 @@ func (s *Store) GetUserByEmail(email string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(
-		`SELECT id, email, password_hash, created_at FROM users WHERE email = ?`, email,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+		`SELECT id, email, password_hash, COALESCE(slug,''), created_at FROM users WHERE email = ?`, email,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
@@ -225,12 +304,12 @@ func (s *Store) GetUserBySession(token string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(`
-		SELECT u.id, u.email, u.password_hash, u.created_at
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), u.created_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = ? AND s.expires_at > ?`,
 		token, time.Now().UTC().Format(time.RFC3339),
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
@@ -249,16 +328,94 @@ func (s *Store) GetUserByMonitorID(monitorID string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(`
-		SELECT u.id, u.email, u.password_hash, u.created_at
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), u.created_at
 		FROM users u
 		JOIN monitors m ON m.user_id = u.id
 		WHERE m.id = ?`, monitorID,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
 	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return u, nil
+}
+
+// GetUserBySlug looks up a user by their public status page slug.
+func (s *Store) GetUserBySlug(slug string) (User, error) {
+	var u User
+	var createdAt string
+	err := s.db.QueryRow(
+		`SELECT id, email, password_hash, COALESCE(slug,''), created_at FROM users WHERE slug = ?`, slug,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
+	if err != nil {
+		return User{}, err
+	}
+	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return u, nil
+}
+
+// GetUptimePercent returns the percentage of successful checks for a monitor over the last N days.
+func (s *Store) GetUptimePercent(monitorID string, days int) (float64, error) {
+	daysStr := fmt.Sprintf("-%d days", days)
+	var total, upCount int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0)
+		FROM monitor_results
+		WHERE monitor_id = ? AND checked_at >= datetime('now', ?)`,
+		monitorID, daysStr,
+	).Scan(&total, &upCount)
+	if err != nil {
+		return 100, err
+	}
+	if total == 0 {
+		return 100, nil
+	}
+	return float64(upCount) * 100.0 / float64(total), nil
+}
+
+// GetDailyUptime returns one uptime-percentage value per day for the last N days,
+// ordered oldest-first. -1 means no data for that day.
+func (s *Store) GetDailyUptime(monitorID string, days int) ([]float64, error) {
+	daysStr := fmt.Sprintf("-%d days", days)
+	rows, err := s.db.Query(`
+		SELECT date(checked_at) AS day,
+		       COUNT(*) AS total,
+		       COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0) AS up_count
+		FROM monitor_results
+		WHERE monitor_id = ? AND checked_at >= datetime('now', ?)
+		GROUP BY date(checked_at)
+		ORDER BY day`, monitorID, daysStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dayMap := make(map[string]float64)
+	for rows.Next() {
+		var day string
+		var total, upCount int
+		if err := rows.Scan(&day, &total, &upCount); err != nil {
+			return nil, err
+		}
+		if total > 0 {
+			dayMap[day] = float64(upCount) * 100.0 / float64(total)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]float64, days)
+	now := time.Now().UTC()
+	for i := 0; i < days; i++ {
+		day := now.AddDate(0, 0, -(days-1-i)).Format("2006-01-02")
+		if uptime, ok := dayMap[day]; ok {
+			result[i] = uptime
+		} else {
+			result[i] = -1
+		}
+	}
+	return result, nil
 }
 
 // Monitor is a URL the user wants to check on a schedule.

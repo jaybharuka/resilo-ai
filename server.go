@@ -532,8 +532,15 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 			http.Error(w, "dashboard not found", http.StatusInternalServerError)
 			return
 		}
-		meta := `<meta name="AUTH_TOKEN" content="` + cfg.Auth.Token + `">`
-		html := strings.Replace(string(body), "</head>", meta+"\n</head>", 1)
+		slug := ""
+		if cookie, cookieErr := r.Cookie("session_token"); cookieErr == nil {
+			if u, sessionErr := store.GetUserBySession(cookie.Value); sessionErr == nil {
+				slug = u.Slug
+			}
+		}
+		metas := `<meta name="AUTH_TOKEN" content="` + cfg.Auth.Token + `">` +
+			`<meta name="USER_SLUG" content="` + slug + `">`
+		html := strings.Replace(string(body), "</head>", metas+"\n</head>", 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(html))
 	}))
@@ -635,6 +642,12 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	mux.HandleFunc("DELETE /api/monitors/{id}", monitorsDeleteHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/outages", monitorsOutagesHandler(store))
+
+	// Public status page — no auth required.
+	mux.HandleFunc("GET /status/{slug}", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/status.html")
+	})
+	mux.HandleFunc("GET /api/status/{slug}", statusDataHandler(store))
 
 	return mux
 }
@@ -769,5 +782,90 @@ func monitorsOutagesHandler(store *Store) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(outages)
+	}
+}
+
+// MonitorStatus is the public view of a monitor for the status page.
+type MonitorStatus struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	URL           string    `json:"url"`
+	Status        string    `json:"status"` // "up" | "down" | "unknown"
+	LastStatusCode *int     `json:"last_status_code"`
+	LastLatencyMs  *int     `json:"last_latency_ms"`
+	LastCheckedAt  *string  `json:"last_checked_at"`
+	UptimePercent  float64  `json:"uptime_percent"`
+	DailyUptime    []float64 `json:"daily_uptime"` // 30 values; -1 = no data
+}
+
+// StatusPageData is the JSON payload returned by GET /api/status/{slug}.
+type StatusPageData struct {
+	Slug          string          `json:"slug"`
+	OverallStatus string          `json:"overall_status"` // "operational" | "partial" | "major"
+	LastUpdated   string          `json:"last_updated"`
+	Monitors      []MonitorStatus `json:"monitors"`
+}
+
+func statusDataHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		slug := r.PathValue("slug")
+		user, err := store.GetUserBySlug(slug)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+
+		monitors, err := store.GetMonitorsByUser(user.ID)
+		if err != nil {
+			slog.Error("statusDataHandler: GetMonitorsByUser failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+
+		statuses := make([]MonitorStatus, 0, len(monitors))
+		downCount := 0
+		for _, m := range monitors {
+			if !m.Enabled {
+				continue
+			}
+			ms := MonitorStatus{
+				ID:            m.ID,
+				Name:          m.Name,
+				URL:           m.URL,
+				LastStatusCode: m.LastStatus,
+				LastLatencyMs:  m.LastLatencyMs,
+				LastCheckedAt:  m.LastCheckedAt,
+			}
+
+			if m.LastStatus == nil {
+				ms.Status = "unknown"
+			} else if *m.LastStatus >= 200 && *m.LastStatus < 300 {
+				ms.Status = "up"
+			} else {
+				ms.Status = "down"
+				downCount++
+			}
+
+			ms.UptimePercent, _ = store.GetUptimePercent(m.ID, 7)
+			ms.DailyUptime, _ = store.GetDailyUptime(m.ID, 30)
+			statuses = append(statuses, ms)
+		}
+
+		overall := "operational"
+		if downCount > 0 && downCount < len(statuses) {
+			overall = "partial"
+		} else if len(statuses) > 0 && downCount == len(statuses) {
+			overall = "major"
+		}
+
+		data := StatusPageData{
+			Slug:          slug,
+			OverallStatus: overall,
+			LastUpdated:   time.Now().UTC().Format(time.RFC3339),
+			Monitors:      statuses,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(data)
 	}
 }

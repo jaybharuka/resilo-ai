@@ -387,6 +387,10 @@
   </div>
   <div class="spacer"></div>
   <div class="ts" id="clockEl"></div>
+  <a id="statusPageLink" href="#" target="_blank"
+     style="font-size:11px;color:#58a6ff;border:1px solid #30363d;border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    ↗ Status Page
+  </a>
   <form action="/auth/logout" method="post" style="margin:0;">
     <button class="btn-logout" type="submit">Sign out</button>
   </form>
@@ -498,8 +502,19 @@
 </div><!-- /content -->
 
 <script>
-// ── Auth token (injected server-side via meta tag) ───────────────
+// ── Auth token and user slug (injected server-side via meta tags) ──
 const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
+const USER_SLUG  = document.querySelector('meta[name="USER_SLUG"]')?.content  || '';
+
+(function () {
+  const link = document.getElementById('statusPageLink');
+  if (USER_SLUG && link) {
+    link.href = `/status/${USER_SLUG}`;
+    link.title = `resilo-ai.fly.dev/status/${USER_SLUG}`;
+  } else if (link) {
+    link.style.display = 'none';
+  }
+})();
 
 function authHeaders(extra) {
   const h = Object.assign({ 'Content-Type': 'application/json' }, extra);
