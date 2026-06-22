@@ -128,5 +128,21 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Auth.Token = v
 	}
 
+	// Validate critical configuration
+	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+		return nil, fmt.Errorf("invalid server port: %d", cfg.Server.Port)
+	}
+	if cfg.Store.Path == "" {
+		return nil, fmt.Errorf("store path cannot be empty")
+	}
+	if cfg.RateLimit.Enabled {
+		if cfg.RateLimit.RequestsPerMinute <= 0 {
+			return nil, fmt.Errorf("rate limit requests per minute must be positive")
+		}
+		if cfg.RateLimit.Burst <= 0 {
+			return nil, fmt.Errorf("rate limit burst must be positive")
+		}
+	}
+	
 	return cfg, nil
 }
