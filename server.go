@@ -1,11 +1,13 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"math/rand"
@@ -199,6 +201,45 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// compressionMiddleware adds gzip compression to HTTP responses.
+func compressionMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Don't compress WebSocket connections
+		if r.Header.Get("Upgrade") == "websocket" {
+			next(w, r)
+			return
+		}
+		
+		// Check if client accepts gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next(w, r)
+			return
+		}
+		
+		// Create gzip writer
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		
+		// Wrap response writer
+		cw := &compressionResponseWriter{
+			Writer:         gz,
+			ResponseWriter: w,
+		}
+		
+		// Set compression header
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+		
+		next(cw, r)
+	}
+}
+
+// compressionResponseWriter wraps gzip.Writer with http.ResponseWriter.
+type compressionResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
 // TriggerRequest is the body for POST /api/trigger.
 type TriggerRequest struct {
 	CPU       bool `json:"cpu"`
@@ -390,7 +431,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	})))
 
 	// GET /api/alerts — query persisted alerts with optional limit and severity filter
-	mux.HandleFunc("/api/alerts", loggingMiddleware(corsMiddleware(authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/alerts", compressionMiddleware(loggingMiddleware(corsMiddleware(authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -416,7 +457,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	}))
 
 	// POST /api/trigger — spike specific metrics
-	mux.HandleFunc("/api/trigger", loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/trigger", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/trigger", compressionMiddleware(loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/trigger", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -437,7 +478,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	})))
 
 	// POST /api/reset — clear all triggers
-	mux.HandleFunc("/api/reset", loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/reset", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/reset", compressionMiddleware(loggingMiddleware(corsMiddleware(rateLimitMiddleware(rl, cfg, "/api/reset", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
