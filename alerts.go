@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,7 +61,13 @@ type AlertEngine struct {
 	// activeAlerts is keyed by the short metric key ("cpu", "mem", "lat", "err").
 	// An entry with a zero resolvedAt is an open incident.
 	// An entry with a non-zero resolvedAt is in post-resolution cooldown.
+	// mu protects activeAlerts for concurrent reads (e.g. /metrics handler).
+	mu           sync.RWMutex
 	activeAlerts map[string]activeAlert
+
+	// Lifetime counters — safe for concurrent reads via atomic.
+	criticalCount atomic.Int64
+	warningCount  atomic.Int64
 }
 
 func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store, cfg *Config) *AlertEngine {
@@ -73,7 +81,28 @@ func newAlertEngine(hub *Hub, sim *Simulator, claude *ClaudeClient, store *Store
 	}
 }
 
+// ActiveCount returns the number of currently open (unresolved) incidents.
+func (ae *AlertEngine) ActiveCount() int {
+	ae.mu.RLock()
+	defer ae.mu.RUnlock()
+	n := 0
+	for _, a := range ae.activeAlerts {
+		if a.resolvedAt.IsZero() {
+			n++
+		}
+	}
+	return n
+}
+
+// Counts returns the lifetime critical and warning alert totals.
+func (ae *AlertEngine) Counts() (critical, warning int64) {
+	return ae.criticalCount.Load(), ae.warningCount.Load()
+}
+
 func (ae *AlertEngine) evaluate(m Metrics) {
+	ae.mu.Lock()
+	defer ae.mu.Unlock()
+
 	a := ae.cfg.Alerts
 	cooldown := time.Duration(a.CooldownSeconds) * time.Second
 
@@ -170,6 +199,12 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			id:      alert.ID,
 			metric:  c.metric,
 			firedAt: now,
+		}
+
+		if severity == SeverityCritical {
+			ae.criticalCount.Add(1)
+		} else {
+			ae.warningCount.Add(1)
 		}
 
 		slog.Warn("alert fired",

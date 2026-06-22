@@ -58,7 +58,7 @@ func main() {
 		}
 	}()
 
-	mux := newServeMux(hub, sim, store, startTime, cfg)
+	mux := newServeMux(hub, sim, alertEngine, store, startTime, cfg)
 
 	// WriteTimeout covers the 1800ms /ping sleep plus NVIDIA API calls (~several seconds).
 	srv := &http.Server{

@@ -67,6 +67,13 @@ func (h *Hub) run() {
 	}
 }
 
+// ClientCount returns the number of currently connected WebSocket clients.
+func (h *Hub) ClientCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
 func (h *Hub) broadcastJSON(v interface{}) {
 	data, err := json.Marshal(v)
 	if err != nil {

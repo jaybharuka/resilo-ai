@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"math/rand"
@@ -210,9 +211,54 @@ func serveIndex(cfg *Config) http.HandlerFunc {
 	}
 }
 
-func newServeMux(hub *Hub, sim *Simulator, store *Store, startTime time.Time, cfg *Config) *http.ServeMux {
+// metricsHandler writes the Prometheus text exposition format for all aiops metrics.
+// Exempted from auth so Grafana Cloud can scrape without a token.
+func metricsHandler(sim *Simulator, ae *AlertEngine, hub *Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m := sim.Current()
+		critical, warning := ae.Counts()
+		active := ae.ActiveCount()
+		clients := hub.ClientCount()
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+		fmt.Fprintf(w, "# HELP aiops_cpu_percent Current host CPU usage percent\n")
+		fmt.Fprintf(w, "# TYPE aiops_cpu_percent gauge\n")
+		fmt.Fprintf(w, "aiops_cpu_percent %g\n\n", m.CPU)
+
+		fmt.Fprintf(w, "# HELP aiops_memory_percent Current host memory usage percent\n")
+		fmt.Fprintf(w, "# TYPE aiops_memory_percent gauge\n")
+		fmt.Fprintf(w, "aiops_memory_percent %g\n\n", m.Memory)
+
+		fmt.Fprintf(w, "# HELP aiops_latency_ms Current p99 latency in milliseconds\n")
+		fmt.Fprintf(w, "# TYPE aiops_latency_ms gauge\n")
+		fmt.Fprintf(w, "aiops_latency_ms %g\n\n", m.Latency)
+
+		fmt.Fprintf(w, "# HELP aiops_error_rate_percent Current HTTP error rate percent\n")
+		fmt.Fprintf(w, "# TYPE aiops_error_rate_percent gauge\n")
+		fmt.Fprintf(w, "aiops_error_rate_percent %g\n\n", m.ErrorRate)
+
+		fmt.Fprintf(w, "# HELP aiops_alerts_total Total alerts fired since startup\n")
+		fmt.Fprintf(w, "# TYPE aiops_alerts_total counter\n")
+		fmt.Fprintf(w, "aiops_alerts_total{severity=\"critical\"} %d\n", critical)
+		fmt.Fprintf(w, "aiops_alerts_total{severity=\"warning\"} %d\n\n", warning)
+
+		fmt.Fprintf(w, "# HELP aiops_active_incidents Current number of open (unresolved) incidents\n")
+		fmt.Fprintf(w, "# TYPE aiops_active_incidents gauge\n")
+		fmt.Fprintf(w, "aiops_active_incidents %d\n\n", active)
+
+		fmt.Fprintf(w, "# HELP aiops_ws_clients Current number of connected WebSocket clients\n")
+		fmt.Fprintf(w, "# TYPE aiops_ws_clients gauge\n")
+		fmt.Fprintf(w, "aiops_ws_clients %d\n", clients)
+	}
+}
+
+func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startTime time.Time, cfg *Config) *http.ServeMux {
 	rl := newRateLimiter(cfg)
 	mux := http.NewServeMux()
+
+	// GET /metrics — Prometheus text format; no auth so Grafana Cloud can scrape freely
+	mux.HandleFunc("/metrics", metricsHandler(sim, ae, hub))
 
 	// GET /health — machine-readable status with uptime and current metrics
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

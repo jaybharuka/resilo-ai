@@ -1,0 +1,22 @@
+// Scrape resilo-ai metrics and push to Grafana Cloud hosted Prometheus.
+
+prometheus.scrape "resilo_ai" {
+  targets = [
+    {"__address__" = "resilo-ai.fly.dev", "__scheme__" = "https"},
+  ]
+  metrics_path    = "/metrics"
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.metrics_hosted_prometheus.receiver]
+}
+
+prometheus.remote_write "metrics_hosted_prometheus" {
+  endpoint {
+    name = "hosted-prometheus"
+    url  = "https://prometheus-prod-43-prod-ap-south-1.grafana.net/api/prom/push"
+
+    basic_auth {
+      username = "3313406"
+      password = sys.env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}
