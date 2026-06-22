@@ -84,13 +84,16 @@ func (h *Hub) broadcastJSON(v interface{}) {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
+	defer func() {
+		c.conn.Close()
+		slog.Info("ws connection closed", "remote", c.conn.RemoteAddr())
+	}()
 	for msg := range c.send {
 		c.mu.Lock()
 		err := c.conn.WriteMessage(websocket.TextMessage, msg)
 		c.mu.Unlock()
 		if err != nil {
-			slog.Warn("ws write error", "err", err)
+			slog.Warn("ws write error", "err", err, "remote", c.conn.RemoteAddr())
 			return
 		}
 	}
@@ -100,6 +103,7 @@ func (c *Client) readPump(hub *Hub) {
 	defer func() {
 		hub.unregister <- c
 		c.conn.Close()
+		slog.Info("ws client unregistered", "remote", c.conn.RemoteAddr())
 	}()
 	for {
 		_, _, err := c.conn.ReadMessage()
