@@ -560,7 +560,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 				return
 			}
 		}
-		http.Redirect(w, r, "/login", http.StatusFound)
+		http.ServeFile(w, r, "static/index.html")
 	})
 
 	// WebSocket endpoint
