@@ -161,6 +161,39 @@ func (m *Mailer) SendSSLExpiryAlert(to, monitorName, url string, expiresAt time.
 	return m.send(to, subject, body)
 }
 
+// SendLatencyAlert notifies a user that a monitor's response time exceeded the threshold.
+func (m *Mailer) SendLatencyAlert(to, monitorName, url string, latencyMs, thresholdMs int) error {
+	subject := fmt.Sprintf("⚡ Slow Response Detected: %s", monitorName)
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:20px;">
+<div style="max-width:540px;margin:0 auto;">
+  <div style="background:#d29922;padding:18px 24px;border-radius:8px 8px 0 0;">
+    <h1 style="margin:0;font-size:18px;color:#0d1117;">⚡ Slow Response Detected</h1>
+  </div>
+  <div style="background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
+    <table style="width:100%%;border-collapse:collapse;margin-bottom:20px;">
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;width:110px;">Monitor</td><td style="font-weight:700;">%s</td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">URL</td><td><a href="%s" style="color:#58a6ff;text-decoration:none;">%s</a></td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Response Time</td><td style="color:#d29922;font-weight:700;">%dms</td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Threshold</td><td>%dms</td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Detected At</td><td>%s</td></tr>
+    </table>
+    <div style="background:#21262d;border-radius:6px;padding:12px 14px;font-size:13px;line-height:1.6;color:#8b949e;">
+      💡 Check the TTFB breakdown on the dashboard to identify whether the slowdown is in DNS resolution, TCP connect, or server processing time.
+    </div>
+    <p style="margin-top:24px;font-size:11px;color:#8b949e;">Sent by <a href="https://resilo-ai.fly.dev" style="color:#58a6ff;">Resilo AI</a> — alerts repeat at most every 30 minutes.</p>
+  </div>
+</div>
+</body></html>`,
+		htmlEscape(monitorName), url, htmlEscape(url),
+		latencyMs, thresholdMs,
+		time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
+	)
+	return m.send(to, subject, body)
+}
+
 func htmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

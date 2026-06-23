@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resilo — Incident History</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --surface2: #21262d;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --yellow:   #d29922;
+      --red:      #f85149;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 14px;
+      height: 52px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; text-decoration: none; }
+    .logo span { color: var(--muted); font-weight: 400; }
+    .spacer { flex: 1; }
+    .ts { font-size: 11px; color: var(--muted); }
+    .nav-link {
+      font-size: 11px; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 5px;
+      padding: 4px 10px; text-decoration: none; white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); border-color: var(--muted); }
+    .nav-link.active { color: var(--accent); border-color: var(--accent); }
+    .btn-logout {
+      background: transparent; border: 1px solid var(--border);
+      border-radius: 5px; color: var(--muted); cursor: pointer;
+      font-size: 11px; padding: 4px 10px;
+    }
+    .btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Page ── */
+    .page { flex: 1; max-width: 1060px; margin: 0 auto; width: 100%; padding: 28px 16px; }
+
+    /* ── Page header ── */
+    .page-header { display: flex; align-items: flex-end; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+    .page-title { font-size: 20px; font-weight: 700; }
+    .summary-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+    .chip {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; padding: 6px 14px; font-size: 12px;
+      display: flex; flex-direction: column; align-items: center; min-width: 100px;
+    }
+    .chip-val { font-size: 18px; font-weight: 700; color: var(--text); }
+    .chip-lbl { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Filters ── */
+    .filter-bar {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .filter-bar select, .filter-bar input {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-size: 12px;
+      padding: 6px 10px; outline: none;
+    }
+    .filter-bar select:focus { border-color: var(--accent); }
+    .filter-bar label { font-size: 11px; color: var(--muted); }
+    .filter-count { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: var(--surface2); padding: 10px 14px; font-size: 11px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+      color: var(--muted); text-align: left; border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 11px 14px; vertical-align: top; font-size: 12px; }
+
+    .badge-ongoing  { background: rgba(248,81,73,.15);  color: var(--red);    border: 1px solid var(--red);    border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+    .badge-resolved { background: rgba(63,185,80,.1);   color: var(--green);  border: 1px solid var(--green);  border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+
+    .rc-cell { max-width: 280px; }
+    .rc-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); max-width: 280px; display: block; }
+
+    .btn-expand {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--accent); font-size: 11px; cursor: pointer; padding: 3px 8px;
+      white-space: nowrap;
+    }
+    .btn-expand:hover { background: var(--surface2); }
+
+    /* ── Expanded detail row ── */
+    .detail-row td {
+      padding: 0 !important;
+      background: #0d1117;
+    }
+    .detail-inner {
+      padding: 14px 20px;
+      border-left: 3px solid var(--accent);
+      margin: 0 14px 10px;
+      background: var(--surface2);
+      border-radius: 0 6px 6px 0;
+      font-size: 12px;
+    }
+    .detail-section { margin-bottom: 10px; }
+    .detail-section:last-child { margin-bottom: 0; }
+    .detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px; }
+    .detail-text { color: var(--text); line-height: 1.6; }
+    .rem-item { display: flex; gap: 8px; padding: 3px 0; }
+    .rem-num { color: var(--accent); font-weight: 700; flex-shrink: 0; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center; padding: 60px 20px; color: var(--muted);
+    }
+    .empty-icon { font-size: 36px; margin-bottom: 12px; }
+    .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+
+    /* ── Pagination ── */
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 20px; }
+    .btn-page {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); cursor: pointer;
+      font-size: 12px; padding: 6px 16px;
+    }
+    .btn-page:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-page:disabled { opacity: .4; cursor: not-allowed; }
+    .page-info { font-size: 12px; color: var(--muted); }
+
+    /* ── Loading ── */
+    .loading { text-align: center; padding: 40px; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/dashboard" class="logo">Resilo<span>AI</span></a>
+  <div class="spacer"></div>
+  <div class="ts" id="clockEl"></div>
+  <a href="/dashboard" class="nav-link">← Dashboard</a>
+  <a href="/incidents" class="nav-link active">📋 Incidents</a>
+  <a href="/settings"  class="nav-link">⚙ Settings</a>
+  <form action="/auth/logout" method="post" style="margin:0;">
+    <button class="btn-logout" type="submit">Sign out</button>
+  </form>
+</header>
+
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Incident History</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px;">All downtime events across your monitors</div>
+    </div>
+    <div class="summary-chips">
+      <div class="chip"><span class="chip-val" id="statTotal">—</span><span class="chip-lbl">This month</span></div>
+      <div class="chip"><span class="chip-val" id="statHours">—</span><span class="chip-lbl">Downtime hrs</span></div>
+      <div class="chip"><span class="chip-val" id="statAvg">—</span><span class="chip-lbl">Avg duration</span></div>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <label>Monitor</label>
+    <select id="filterMonitor" onchange="applyFilters()">
+      <option value="">All monitors</option>
+    </select>
+    <label style="margin-left:6px;">Status</label>
+    <select id="filterStatus" onchange="applyFilters()">
+      <option value="">All</option>
+      <option value="ongoing">Ongoing</option>
+      <option value="resolved">Resolved</option>
+    </select>
+    <span class="filter-count" id="filterCount"></span>
+  </div>
+
+  <div class="table-wrap" id="tableWrap">
+    <div class="loading">Loading…</div>
+  </div>
+
+  <div class="pagination" id="pagination" style="display:none;">
+    <button class="btn-page" id="btnPrev" onclick="goPage(currentPage-1)">← Previous</button>
+    <span class="page-info" id="pageInfo"></span>
+    <button class="btn-page" id="btnNext" onclick="goPage(currentPage+1)">Next →</button>
+  </div>
+</div>
+
+<script>
+// ── Clock ──────────────────────────────────────────────────────────────────
+const clockEl = document.getElementById('clockEl');
+function tick() { clockEl.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+tick(); setInterval(tick, 1000);
+
+// ── State ─────────────────────────────────────────────────────────────────
+let allIncidents  = [];  // full page from API (up to 200 loaded once for filtering)
+let filtered      = [];
+let currentPage   = 1;
+const PAGE_SIZE   = 20;
+let expandedId    = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async function init() {
+  const res = await fetch('/api/incidents?limit=200', { credentials: 'include' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) { document.getElementById('tableWrap').innerHTML = '<div class="loading">Failed to load incidents.</div>'; return; }
+  const data = await res.json();
+  allIncidents = data.incidents || [];
+  buildMonitorFilter(allIncidents);
+  computeSummary(allIncidents);
+  applyFilters();
+})();
+
+// ── Monitor dropdown ──────────────────────────────────────────────────────
+function buildMonitorFilter(incidents) {
+  const seen = new Map();
+  incidents.forEach(i => { if (!seen.has(i.monitor_id)) seen.set(i.monitor_id, i.monitor_name); });
+  const sel = document.getElementById('filterMonitor');
+  seen.forEach((name, id) => {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Summary chips ─────────────────────────────────────────────────────────
+function computeSummary(incidents) {
+  const now   = new Date();
+  const month = now.getMonth();
+  const year  = now.getFullYear();
+  const thisMonth = incidents.filter(i => {
+    const d = new Date(i.started_at);
+    return d.getMonth() === month && d.getFullYear() === year;
+  });
+  document.getElementById('statTotal').textContent = thisMonth.length;
+
+  const resolved = thisMonth.filter(i => i.duration_seconds != null);
+  const totalSec = resolved.reduce((s, i) => s + i.duration_seconds, 0);
+  document.getElementById('statHours').textContent = (totalSec / 3600).toFixed(1);
+
+  if (resolved.length > 0) {
+    const avgSec = totalSec / resolved.length;
+    document.getElementById('statAvg').textContent = fmtDuration(avgSec);
+  } else {
+    document.getElementById('statAvg').textContent = '—';
+  }
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────
+function applyFilters() {
+  const monitorID = document.getElementById('filterMonitor').value;
+  const status    = document.getElementById('filterStatus').value;
+  filtered = allIncidents.filter(i => {
+    if (monitorID && i.monitor_id !== monitorID) return false;
+    if (status === 'ongoing'  && !i.is_ongoing)  return false;
+    if (status === 'resolved' &&  i.is_ongoing)  return false;
+    return true;
+  });
+  document.getElementById('filterCount').textContent =
+    filtered.length === allIncidents.length ? `${filtered.length} total` : `${filtered.length} of ${allIncidents.length}`;
+  currentPage = 1;
+  expandedId  = null;
+  render();
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────
+function goPage(p) {
+  const maxPage = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  currentPage = Math.min(Math.max(1, p), maxPage);
+  expandedId  = null;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function render() {
+  const wrap = document.getElementById('tableWrap');
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">✅</div>
+        <div class="empty-title">No incidents recorded — great!</div>
+        <div style="margin-top:6px;font-size:12px;">All your monitors have been healthy.</div>
+      </div>`;
+    document.getElementById('pagination').style.display = 'none';
+    return;
+  }
+
+  const maxPage = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const page    = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  let rows = '';
+  page.forEach(i => {
+    const status   = i.is_ongoing
+      ? `<span class="badge-ongoing">ONGOING</span>`
+      : `<span class="badge-resolved">RESOLVED</span>`;
+    const dur      = i.duration_seconds != null ? fmtDuration(i.duration_seconds) : i.is_ongoing ? 'In progress' : '—';
+    const started  = fmtDate(i.started_at);
+    const rc       = i.root_cause ? escHtml(i.root_cause) : '<span style="color:var(--muted)">—</span>';
+    const rcShort  = i.root_cause ? escHtml(i.root_cause.length > 80 ? i.root_cause.slice(0,80) + '…' : i.root_cause) : '—';
+    const hasDetail = i.root_cause || i.remediation;
+
+    rows += `
+      <tr id="row-${i.id}">
+        <td>
+          <div style="font-weight:600;">${escHtml(i.monitor_name)}</div>
+          <div style="font-size:11px;color:var(--accent);margin-top:2px;">${escHtml(i.monitor_url)}</div>
+        </td>
+        <td style="white-space:nowrap;">${started}</td>
+        <td style="white-space:nowrap;">${dur}</td>
+        <td>${status}</td>
+        <td class="rc-cell" title="${rc}">
+          <span class="rc-text">${rcShort}</span>
+        </td>
+        <td>
+          ${hasDetail ? `<button class="btn-expand" onclick="toggleDetail('${i.id}')" id="btn-${i.id}">View details</button>` : '<span style="color:var(--muted)">—</span>'}
+        </td>
+      </tr>
+      <tr class="detail-row" id="detail-${i.id}" style="display:none;">
+        <td colspan="6">
+          <div class="detail-inner">
+            ${i.root_cause ? `
+              <div class="detail-section">
+                <div class="detail-label">Root Cause</div>
+                <div class="detail-text">${escHtml(i.root_cause)}</div>
+              </div>` : ''}
+            ${i.remediation ? `
+              <div class="detail-section">
+                <div class="detail-label">Remediation Steps</div>
+                ${parseRemediation(i.remediation)}
+              </div>` : ''}
+            ${i.error ? `
+              <div class="detail-section">
+                <div class="detail-label">Error</div>
+                <div class="detail-text" style="color:var(--red);font-family:monospace;">${escHtml(i.error)}</div>
+              </div>` : ''}
+          </div>
+        </td>
+      </tr>`;
+  });
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Monitor</th>
+          <th>Started</th>
+          <th>Duration</th>
+          <th>Status</th>
+          <th>Root Cause</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  // Restore expanded row if user navigated pages (won't match but safe).
+  if (expandedId) showDetail(expandedId);
+
+  // Pagination
+  const pag = document.getElementById('pagination');
+  pag.style.display = maxPage > 1 ? 'flex' : 'none';
+  document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${maxPage}`;
+  document.getElementById('btnPrev').disabled = currentPage <= 1;
+  document.getElementById('btnNext').disabled = currentPage >= maxPage;
+}
+
+// ── Detail expand/collapse ────────────────────────────────────────────────
+function toggleDetail(id) {
+  if (expandedId === id) {
+    hideDetail(id);
+  } else {
+    if (expandedId) hideDetail(expandedId);
+    showDetail(id);
+  }
+}
+
+function showDetail(id) {
+  const row = document.getElementById(`detail-${id}`);
+  const btn = document.getElementById(`btn-${id}`);
+  if (row) row.style.display = '';
+  if (btn) btn.textContent = 'Hide details';
+  expandedId = id;
+}
+
+function hideDetail(id) {
+  const row = document.getElementById(`detail-${id}`);
+  const btn = document.getElementById(`btn-${id}`);
+  if (row) row.style.display = 'none';
+  if (btn) btn.textContent = 'View details';
+  expandedId = null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function fmtDuration(seconds) {
+  if (seconds < 60)   return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds/60)}m ${Math.round(seconds%60)}s`;
+  const h = Math.floor(seconds/3600);
+  const m = Math.floor((seconds%3600)/60);
+  return `${h}h ${m}m`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&#34;');
+}
+
+function parseRemediation(text) {
+  if (!text) return '';
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  return lines.map((l, i) => {
+    // Strip leading "1. " numbering if present.
+    const clean = l.replace(/^\d+\.\s*/, '');
+    return `<div class="rem-item"><span class="rem-num">${i+1}.</span><span>${escHtml(clean)}</span></div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

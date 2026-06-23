@@ -375,6 +375,16 @@
     </div>
   </div>
 
+  <a href="/incidents"
+     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    📋 Incidents
+  </a>
+
+  <a href="/settings"
+     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    ⚙ Settings
+  </a>
+
   <form action="/auth/logout" method="post" style="margin:0;">
     <button class="btn-logout" type="submit">Sign out</button>
   </form>
@@ -404,6 +414,10 @@
         <input type="text" name="keyword" placeholder="e.g. healthy, Welcome" style="min-width:160px;" />
       </div>
       <div class="form-field">
+        <label>Latency alert <span style="color:var(--muted);font-weight:400;">(ms, optional)</span></label>
+        <input type="number" name="latency_threshold" placeholder="e.g. 2000" min="0" style="min-width:120px;" />
+      </div>
+      <div class="form-field">
         <label>Interval</label>
         <select name="interval">
           <option value="60">Every 1 min</option>
@@ -413,6 +427,9 @@
         </select>
       </div>
       <button type="submit" class="btn-add" id="btnAddMonitor">+ Add</button>
+      <div id="limitNote" style="display:none;font-size:11px;color:var(--yellow);margin-top:6px;">
+        Monitor limit reached (max <span id="limitNoteMax"></span>) — contact us to upgrade.
+      </div>
     </form>
 
     <div class="monitor-grid" id="monitorGrid">
@@ -525,9 +542,18 @@ applySlug(USER_SLUG);
 // ── Monitor list ─────────────────────────────────────────────────
 let monitorsData  = [];
 let selectedId    = null;
+let monitorLimit  = 10; // updated from /api/account/me on load
 
 const monitorGrid    = document.getElementById('monitorGrid');
 const monitorCountEl = document.getElementById('monitorCount');
+
+(async function loadAccountInfo() {
+  const res = await fetch('/api/account/me', { credentials: 'include' });
+  if (res.ok) {
+    const d = await res.json();
+    if (d.max_monitors) monitorLimit = d.max_monitors;
+  }
+})();
 
 function isUp(m) {
   if (m.last_status == null) return null;
@@ -536,7 +562,17 @@ function isUp(m) {
 
 function renderMonitors(monitors) {
   monitorsData = monitors;
-  monitorCountEl.textContent = monitors.length;
+  monitorCountEl.textContent = `${monitors.length}/${monitorLimit}`;
+
+  const addBtn    = document.getElementById('btnAddMonitor');
+  const limitNote = document.getElementById('limitNote');
+  const atLimit   = monitors.length >= monitorLimit;
+  addBtn.disabled = atLimit;
+  if (limitNote) {
+    limitNote.style.display = atLimit ? 'block' : 'none';
+    const maxSpan = document.getElementById('limitNoteMax');
+    if (maxSpan) maxSpan.textContent = monitorLimit;
+  }
 
   monitorGrid.querySelectorAll('.monitor-card').forEach(el => el.remove());
   document.getElementById('monitorEmpty')?.remove();
@@ -577,6 +613,7 @@ function renderMonitors(monitors) {
         <span>⏱ ${latency}</span>
         <span>🕐 ${relTime(m.last_checked_at)}</span>
         <span>↻ ${interval}</span>
+        ${m.latency_threshold_ms > 0 ? `<span style="color:var(--yellow);">⚡ >${m.latency_threshold_ms}ms</span>` : ''}
       </div>
       <button class="btn-edit"   title="Edit"   onclick="event.stopPropagation();openEdit('${m.id}')">✏</button>
       <button class="btn-delete" title="Delete" onclick="event.stopPropagation();deleteMonitor('${m.id}')">✕</button>
@@ -593,6 +630,10 @@ function renderMonitors(monitors) {
           <div class="edit-field">
             <label>Keyword</label>
             <input name="edit-keyword" value="${escHtml(m.keyword || '')}" placeholder="optional" style="min-width:110px;" />
+          </div>
+          <div class="edit-field">
+            <label>Latency alert (ms)</label>
+            <input name="edit-latency-threshold" type="number" min="0" value="${m.latency_threshold_ms || ''}" placeholder="optional" style="min-width:110px;" />
           </div>
           <div class="edit-field">
             <label>Interval</label>
@@ -637,10 +678,11 @@ async function saveEdit(id) {
   const btn   = form.querySelector('.btn-save');
   if (!form) return;
 
-  const name     = form.querySelector('[name="edit-name"]').value.trim();
-  const url      = form.querySelector('[name="edit-url"]').value.trim();
-  const keyword  = form.querySelector('[name="edit-keyword"]').value.trim();
-  const interval = parseInt(form.querySelector('[name="edit-interval"]').value, 10);
+  const name              = form.querySelector('[name="edit-name"]').value.trim();
+  const url               = form.querySelector('[name="edit-url"]').value.trim();
+  const keyword           = form.querySelector('[name="edit-keyword"]').value.trim();
+  const interval          = parseInt(form.querySelector('[name="edit-interval"]').value, 10);
+  const latencyThreshold  = parseInt(form.querySelector('[name="edit-latency-threshold"]').value, 10) || 0;
 
   errEl.textContent = '';
 
@@ -655,7 +697,7 @@ async function saveEdit(id) {
     const res = await fetch(`/api/monitors/${id}`, {
       method: 'PUT', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url, keyword, interval_seconds: interval }),
+      body: JSON.stringify({ name, url, keyword, interval_seconds: interval, latency_threshold_ms: latencyThreshold }),
     });
     if (res.status === 401) { location.href = '/login'; return; }
     if (!res.ok) {
@@ -703,13 +745,21 @@ document.getElementById('addMonitorForm').addEventListener('submit', async e => 
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name:             form.name.value.trim(),
-        url:              form.url.value.trim(),
-        keyword:          form.keyword.value.trim(),
-        interval_seconds: parseInt(form.interval.value, 10),
+        name:                 form.name.value.trim(),
+        url:                  form.url.value.trim(),
+        keyword:              form.keyword.value.trim(),
+        interval_seconds:     parseInt(form.interval.value, 10),
+        latency_threshold_ms: parseInt(form.latency_threshold.value, 10) || 0,
       }),
     });
     if (res.status === 401) { location.href = '/login'; return; }
+    if (res.status === 429) {
+      const d = await res.json().catch(() => ({}));
+      const limitNote = document.getElementById('limitNote');
+      if (limitNote) limitNote.style.display = 'block';
+      alert(d.error || 'Monitor limit reached');
+      return;
+    }
     if (res.ok) { form.reset(); await fetchMonitors(); }
     else { alert('Error: ' + await res.text()); }
   } catch (e) { console.error(e); }
@@ -813,6 +863,7 @@ function renderDetail(m, results, outages) {
         ${m.keyword ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">🔍 Checking for: <span style="color:var(--text);font-weight:600;">"${escHtml(m.keyword)}"</span></div>` : ''}
         ${m.last_error && m.last_error.startsWith('keyword not found')
           ? `<div style="margin-top:4px;font-size:11px;color:var(--red);">⚠ ${escHtml(m.last_error)}</div>` : ''}
+        ${m.latency_threshold_ms > 0 ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">⚡ Latency alert threshold: <span style="color:var(--yellow);font-weight:600;">${m.latency_threshold_ms}ms</span></div>` : ''}
       </div>
       <button class="btn-close" onclick="closeDetail()">✕</button>
     </div>

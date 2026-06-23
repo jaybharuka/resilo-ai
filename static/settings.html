@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resilo — Settings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --surface2: #21262d;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --yellow:   #d29922;
+      --red:      #f85149;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 14px;
+      height: 52px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+    .logo span { color: var(--muted); font-weight: 400; }
+    .spacer { flex: 1; }
+    .ts { font-size: 11px; color: var(--muted); }
+    .btn-logout {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+    .btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Page body ── */
+    .page {
+      flex: 1;
+      max-width: 600px;
+      margin: 32px auto;
+      width: 100%;
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .section-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .5px; }
+    .field input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .field .hint { font-size: 11px; color: var(--muted); }
+
+    .btn-primary {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #0d1117;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 16px;
+      align-self: flex-start;
+      transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: .85; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+
+    .msg {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 5px;
+      display: none;
+    }
+    .msg.success { display: block; background: rgba(63,185,80,.12); border: 1px solid var(--green); color: var(--green); }
+    .msg.error   { display: block; background: rgba(248,81,73,.12); border: 1px solid var(--red);   color: var(--red);   }
+
+    /* ── Danger zone ── */
+    .section.danger { border-color: var(--red); }
+    .section.danger .section-header { color: var(--red); border-bottom-color: rgba(248,81,73,.3); }
+
+    .delete-confirm-wrap { display: none; flex-direction: column; gap: 10px; margin-top: 6px; }
+    .delete-confirm-wrap.open { display: flex; }
+
+    .btn-danger {
+      background: transparent;
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 16px;
+      align-self: flex-start;
+      transition: background .15s;
+    }
+    .btn-danger:hover { background: rgba(248,81,73,.12); }
+    .btn-danger:disabled { opacity: .4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/dashboard" class="logo" style="text-decoration:none;">Resilo<span>AI</span></a>
+  <div class="spacer"></div>
+  <div class="ts" id="clockEl"></div>
+
+  <a href="/dashboard"
+     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    ← Dashboard
+  </a>
+
+  <a href="/settings"
+     style="font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    ⚙ Settings
+  </a>
+
+  <form action="/auth/logout" method="post" style="margin:0;">
+    <button class="btn-logout" type="submit">Sign out</button>
+  </form>
+</header>
+
+<div class="page">
+  <div>
+    <h1>Account Settings</h1>
+    <p style="color:var(--muted);font-size:12px;margin-top:4px;">Manage your email, password, and account.</p>
+  </div>
+
+  <!-- ── Plan ── -->
+  <div class="section">
+    <div class="section-header">Plan</div>
+    <div class="section-body">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:14px;font-weight:600;">Free Plan</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px;" id="planSubtitle">Up to 10 monitors</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:12px;color:var(--muted);">
+          Current plan
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);padding:10px 0 2px;">
+        Includes: URL monitoring, SSL alerts, keyword checks, TTFB breakdown, latency threshold alerts, email notifications.
+      </div>
+      <div style="font-size:12px;color:var(--muted);">
+        Need more monitors? <a href="mailto:gkbharuka@gmail.com" style="color:var(--accent);">Contact us</a> to upgrade.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Change Email ── -->
+  <div class="section">
+    <div class="section-header">Change Email</div>
+    <div class="section-body">
+      <div class="field">
+        <label>Current email</label>
+        <input type="email" id="currentEmailDisplay" disabled style="color:var(--muted);cursor:default;" />
+      </div>
+      <div class="field">
+        <label>New email</label>
+        <input type="email" id="newEmail" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="field">
+        <label>Password confirmation</label>
+        <input type="password" id="emailPassword" placeholder="Your current password" autocomplete="current-password" />
+      </div>
+      <div class="msg" id="emailMsg"></div>
+      <button class="btn-primary" id="emailBtn" onclick="changeEmail()">Update email</button>
+    </div>
+  </div>
+
+  <!-- ── Change Password ── -->
+  <div class="section">
+    <div class="section-header">Change Password</div>
+    <div class="section-body">
+      <div class="field">
+        <label>Current password</label>
+        <input type="password" id="currentPassword" placeholder="Current password" autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <label>New password</label>
+        <input type="password" id="newPassword" placeholder="At least 8 characters" autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label>Confirm new password</label>
+        <input type="password" id="confirmPassword" placeholder="Repeat new password" autocomplete="new-password" />
+      </div>
+      <div class="msg" id="passwordMsg"></div>
+      <button class="btn-primary" id="passwordBtn" onclick="changePassword()">Update password</button>
+    </div>
+  </div>
+
+  <!-- ── Danger Zone ── -->
+  <div class="section danger">
+    <div class="section-header">Danger Zone</div>
+    <div class="section-body">
+      <p style="color:var(--muted);font-size:12px;line-height:1.6;">
+        Permanently delete your account and all associated monitors, results, and data.
+        This action <strong style="color:var(--text);">cannot be undone</strong>.
+      </p>
+      <button class="btn-danger" onclick="showDeleteConfirm()">Delete my account</button>
+
+      <div class="delete-confirm-wrap" id="deleteConfirmWrap">
+        <div class="field">
+          <label>Type <strong style="color:var(--text);">DELETE</strong> to confirm</label>
+          <input type="text" id="deleteConfirmText" placeholder="DELETE" oninput="onDeleteInput()" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="deletePassword" placeholder="Your current password" autocomplete="current-password" />
+        </div>
+        <div class="msg" id="deleteMsg"></div>
+        <button class="btn-danger" id="deleteBtn" onclick="deleteAccount()" disabled>Permanently delete account</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Clock ──────────────────────────────────────────────────────────────────
+const clockEl = document.getElementById('clockEl');
+function tick() { clockEl.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+tick(); setInterval(tick, 1000);
+
+// ── Load current email ─────────────────────────────────────────────────────
+(async function loadAccountInfo() {
+  const res = await fetch('/api/account/me', { credentials: 'include' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (res.ok) {
+    const d = await res.json();
+    document.getElementById('currentEmailDisplay').value = d.email || '';
+    if (d.max_monitors) {
+      document.getElementById('planSubtitle').textContent = `Up to ${d.max_monitors} monitors`;
+    }
+  }
+})();
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  el.className = 'msg ' + type;
+  el.textContent = text;
+}
+function clearMsg(id) {
+  const el = document.getElementById(id);
+  el.className = 'msg';
+  el.textContent = '';
+}
+
+// ── Change email ───────────────────────────────────────────────────────────
+async function changeEmail() {
+  clearMsg('emailMsg');
+  const newEmail   = document.getElementById('newEmail').value.trim();
+  const password   = document.getElementById('emailPassword').value;
+  const btn        = document.getElementById('emailBtn');
+
+  if (!newEmail) { showMsg('emailMsg', 'error', 'Please enter a new email address.'); return; }
+  if (!password)  { showMsg('emailMsg', 'error', 'Please enter your password.');       return; }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/account/email', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_email: newEmail, password }),
+    });
+    if (res.status === 401) { location.href = '/login'; return; }
+    const data = await res.json();
+    if (!res.ok) { showMsg('emailMsg', 'error', data.error || 'Update failed.'); return; }
+    document.getElementById('currentEmailDisplay').value = newEmail;
+    document.getElementById('newEmail').value = '';
+    document.getElementById('emailPassword').value = '';
+    showMsg('emailMsg', 'success', 'Email updated successfully.');
+  } catch { showMsg('emailMsg', 'error', 'Network error.'); }
+  finally { btn.disabled = false; btn.textContent = 'Update email'; }
+}
+
+// ── Change password ────────────────────────────────────────────────────────
+async function changePassword() {
+  clearMsg('passwordMsg');
+  const current  = document.getElementById('currentPassword').value;
+  const next     = document.getElementById('newPassword').value;
+  const confirm  = document.getElementById('confirmPassword').value;
+  const btn      = document.getElementById('passwordBtn');
+
+  if (!current) { showMsg('passwordMsg', 'error', 'Enter your current password.'); return; }
+  if (next.length < 8) { showMsg('passwordMsg', 'error', 'New password must be at least 8 characters.'); return; }
+  if (next !== confirm) { showMsg('passwordMsg', 'error', 'New passwords do not match.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/account/password', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    });
+    if (res.status === 401) { location.href = '/login'; return; }
+    const data = await res.json();
+    if (!res.ok) { showMsg('passwordMsg', 'error', data.error || 'Update failed.'); return; }
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
+    showMsg('passwordMsg', 'success', 'Password updated successfully.');
+  } catch { showMsg('passwordMsg', 'error', 'Network error.'); }
+  finally { btn.disabled = false; btn.textContent = 'Update password'; }
+}
+
+// ── Delete account ─────────────────────────────────────────────────────────
+function showDeleteConfirm() {
+  document.getElementById('deleteConfirmWrap').classList.add('open');
+}
+
+function onDeleteInput() {
+  const val = document.getElementById('deleteConfirmText').value;
+  document.getElementById('deleteBtn').disabled = (val !== 'DELETE');
+}
+
+async function deleteAccount() {
+  clearMsg('deleteMsg');
+  const password = document.getElementById('deletePassword').value;
+  const btn      = document.getElementById('deleteBtn');
+
+  if (!password) { showMsg('deleteMsg', 'error', 'Enter your password to confirm.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    const res = await fetch('/api/account', {
+      method: 'DELETE', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showMsg('deleteMsg', 'error', data.error || 'Deletion failed.');
+      btn.disabled = false; btn.textContent = 'Permanently delete account';
+      return;
+    }
+    // Success — account gone, redirect to login.
+    location.href = '/login';
+  } catch {
+    showMsg('deleteMsg', 'error', 'Network error.');
+    btn.disabled = false; btn.textContent = 'Permanently delete account';
+  }
+}
+</script>
+</body>
+</html>

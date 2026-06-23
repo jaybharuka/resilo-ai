@@ -648,6 +648,23 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	// Profile routes — session-cookie auth.
 	mux.HandleFunc("PUT /api/profile/slug", profileSlugHandler(store))
 
+	// Settings page.
+	mux.HandleFunc("GET /settings", sessionMiddleware(store, func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/settings.html")
+	}))
+
+	// Incidents page.
+	mux.HandleFunc("GET /incidents", sessionMiddleware(store, func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/incidents.html")
+	}))
+	mux.HandleFunc("GET /api/incidents", incidentsHandler(store))
+
+	// Account management routes — session-cookie auth.
+	mux.HandleFunc("GET /api/account/me", accountMeHandler(store))
+	mux.HandleFunc("PUT /api/account/password", accountPasswordHandler(store))
+	mux.HandleFunc("PUT /api/account/email", accountEmailHandler(store))
+	mux.HandleFunc("DELETE /api/account", accountDeleteHandler(store))
+
 	// Public status page — no auth required.
 	mux.HandleFunc("GET /status/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/status.html")
@@ -704,10 +721,11 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Name            string `json:"name"`
-			URL             string `json:"url"`
-			Keyword         string `json:"keyword"`
-			IntervalSeconds int    `json:"interval_seconds"`
+			Name               string `json:"name"`
+			URL                string `json:"url"`
+			Keyword            string `json:"keyword"`
+			IntervalSeconds    int    `json:"interval_seconds"`
+			LatencyThresholdMs int    `json:"latency_threshold_ms"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -720,7 +738,23 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 		if req.IntervalSeconds <= 0 {
 			req.IntervalSeconds = 60
 		}
-		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds)
+		count, err := store.GetMonitorCount(user.ID)
+		if err != nil {
+			slog.Error("GetMonitorCount failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if count >= user.MaxMonitors {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":        "monitor limit reached",
+				"limit":        user.MaxMonitors,
+				"upgrade_hint": "Contact us to increase your limit",
+			})
+			return
+		}
+		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds, req.LatencyThresholdMs)
 		if err != nil {
 			slog.Error("CreateMonitor failed", "err", err)
 			http.Error(w, "db error", http.StatusInternalServerError)
@@ -741,10 +775,11 @@ func monitorsUpdateHandler(store *Store) http.HandlerFunc {
 		}
 		id := r.PathValue("id")
 		var req struct {
-			Name            string `json:"name"`
-			URL             string `json:"url"`
-			Keyword         string `json:"keyword"`
-			IntervalSeconds int    `json:"interval_seconds"`
+			Name               string `json:"name"`
+			URL                string `json:"url"`
+			Keyword            string `json:"keyword"`
+			IntervalSeconds    int    `json:"interval_seconds"`
+			LatencyThresholdMs int    `json:"latency_threshold_ms"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -770,7 +805,7 @@ func monitorsUpdateHandler(store *Store) http.HandlerFunc {
 			json.NewEncoder(w).Encode(map[string]string{"error": "interval must be 60, 300, 600, or 1800 seconds"})
 			return
 		}
-		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds); err != nil {
+		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds, req.LatencyThresholdMs); err != nil {
 			slog.Error("UpdateMonitor failed", "err", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -838,6 +873,45 @@ func monitorsOutagesHandler(store *Store) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(outages)
+	}
+}
+
+func incidentsHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		page := 1
+		limit := 20
+		if p := r.URL.Query().Get("page"); p != "" {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				page = n
+			}
+		}
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+				limit = n
+			}
+		}
+		offset := (page - 1) * limit
+		rows, total, err := store.GetOutagesByUser(user.ID, limit, offset)
+		if err != nil {
+			slog.Error("GetOutagesByUser failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+		if rows == nil {
+			rows = []OutageRow{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"incidents":   rows,
+			"total":       total,
+			"page":        page,
+			"limit":       limit,
+			"total_pages": (total + limit - 1) / limit,
+		})
 	}
 }
 
@@ -980,5 +1054,139 @@ func profileSlugHandler(store *Store) http.HandlerFunc {
 		slog.Info("slug updated", "user_id", user.ID, "slug", slug)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"slug": slug})
+	}
+}
+
+func accountMeHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"email":        user.Email,
+			"id":           user.ID,
+			"max_monitors": user.MaxMonitors,
+		})
+	}
+}
+
+func jsonErr(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func accountPasswordHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if !CheckPassword(user.PasswordHash, req.CurrentPassword) {
+			jsonErr(w, http.StatusBadRequest, "current password is incorrect")
+			return
+		}
+		if len(req.NewPassword) < 8 {
+			jsonErr(w, http.StatusBadRequest, "new password must be at least 8 characters")
+			return
+		}
+		hash, err := HashPassword(req.NewPassword)
+		if err != nil {
+			slog.Error("accountPasswordHandler: hash failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		if err := store.UpdatePassword(user.ID, hash); err != nil {
+			slog.Error("UpdatePassword failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		slog.Info("password changed", "user_id", user.ID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "password updated"})
+	}
+}
+
+func accountEmailHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			NewEmail string `json:"new_email"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if !CheckPassword(user.PasswordHash, req.Password) {
+			jsonErr(w, http.StatusBadRequest, "password is incorrect")
+			return
+		}
+		newEmail := strings.TrimSpace(strings.ToLower(req.NewEmail))
+		if newEmail == "" || !strings.Contains(newEmail, "@") {
+			jsonErr(w, http.StatusBadRequest, "invalid email address")
+			return
+		}
+		if _, err := store.GetUserByEmail(newEmail); err == nil {
+			jsonErr(w, http.StatusBadRequest, "that email is already in use")
+			return
+		}
+		if err := store.UpdateEmail(user.ID, newEmail); err != nil {
+			slog.Error("UpdateEmail failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		slog.Info("email changed", "user_id", user.ID, "new_email", newEmail)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "email updated"})
+	}
+}
+
+func accountDeleteHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if !CheckPassword(user.PasswordHash, req.Password) {
+			jsonErr(w, http.StatusBadRequest, "password is incorrect")
+			return
+		}
+		if err := store.DeleteAccount(user.ID); err != nil {
+			slog.Error("DeleteAccount failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		// Clear the session cookie.
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_token",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+		})
+		slog.Info("account deleted", "user_id", user.ID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 	}
 }

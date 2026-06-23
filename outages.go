@@ -68,6 +68,65 @@ func (s *Store) UpdateOutageAnalysis(id, rootCause, remediation string) error {
 	return err
 }
 
+// OutageRow is the enriched shape returned by the cross-monitor incidents API.
+type OutageRow struct {
+	ID              string  `json:"id"`
+	MonitorID       string  `json:"monitor_id"`
+	MonitorName     string  `json:"monitor_name"`
+	MonitorURL      string  `json:"monitor_url"`
+	StartedAt       string  `json:"started_at"`
+	ResolvedAt      *string `json:"resolved_at"`
+	DurationSeconds *int    `json:"duration_seconds"`
+	RootCause       *string `json:"root_cause"`
+	Remediation     *string `json:"remediation"`
+	StatusCode      *int    `json:"status_code"`
+	Error           *string `json:"error"`
+	IsOngoing       bool    `json:"is_ongoing"`
+}
+
+// GetOutagesByUser returns paginated outages across all monitors owned by userID.
+func (s *Store) GetOutagesByUser(userID string, limit, offset int) ([]OutageRow, int, error) {
+	var total int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM outages o
+		JOIN monitors m ON m.id = o.monitor_id
+		WHERE m.user_id = ?`, userID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.db.Query(`
+		SELECT o.id, o.monitor_id, m.name, m.url,
+		       o.started_at, o.resolved_at,
+		       CASE WHEN o.resolved_at IS NOT NULL
+		            THEN CAST((julianday(o.resolved_at) - julianday(o.started_at)) * 86400 AS INTEGER)
+		            ELSE NULL END AS duration_seconds,
+		       o.root_cause, o.remediation, o.status_code, o.error
+		FROM outages o
+		JOIN monitors m ON m.id = o.monitor_id
+		WHERE m.user_id = ?
+		ORDER BY o.started_at DESC
+		LIMIT ? OFFSET ?`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var result []OutageRow
+	for rows.Next() {
+		var r OutageRow
+		if err := rows.Scan(
+			&r.ID, &r.MonitorID, &r.MonitorName, &r.MonitorURL,
+			&r.StartedAt, &r.ResolvedAt, &r.DurationSeconds,
+			&r.RootCause, &r.Remediation, &r.StatusCode, &r.Error,
+		); err != nil {
+			return nil, 0, err
+		}
+		r.IsOngoing = r.ResolvedAt == nil
+		result = append(result, r)
+	}
+	return result, total, rows.Err()
+}
+
 // GetOutagesByMonitor returns the most recent outages for a monitor.
 func (s *Store) GetOutagesByMonitor(monitorID string, limit int) ([]Outage, error) {
 	rows, err := s.db.Query(`

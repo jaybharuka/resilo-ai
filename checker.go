@@ -202,6 +202,18 @@ func (c *Checker) check(m Monitor) {
 		}
 		go c.handleRecovery(m, downDur)
 	}
+
+	// Latency threshold alerting (UP checks only).
+	if newStatus == "up" && m.LatencyThresholdMs > 0 {
+		if latencyMs > m.LatencyThresholdMs {
+			go c.checkLatencyAlert(m, latencyMs)
+		} else if m.LatencyAlertSentAt != nil {
+			// Latency is healthy again — reset cooldown.
+			if err := c.store.UpdateLatencyAlertSent(m.ID, nil); err != nil {
+				slog.Error("checker: reset latency_alert_sent_at failed", "monitor_id", m.ID, "err", err)
+			}
+		}
+	}
 }
 
 // analyzeOutage creates an outage record, runs AI analysis, then emails the owner.
@@ -298,6 +310,38 @@ func (c *Checker) sendSSLAlert(m Monitor, expiry time.Time, critical bool) {
 
 // handleRecovery resolves the outage record and emails the owner.
 // Runs in its own goroutine.
+// checkLatencyAlert fires a latency alert email if the 30-minute cooldown has elapsed.
+func (c *Checker) checkLatencyAlert(m Monitor, latencyMs int) {
+	if m.LatencyAlertSentAt != nil {
+		if t, err := time.Parse(time.RFC3339, *m.LatencyAlertSentAt); err == nil {
+			if time.Since(t) < 30*time.Minute {
+				return
+			}
+		}
+	}
+
+	now := time.Now()
+	if err := c.store.UpdateLatencyAlertSent(m.ID, &now); err != nil {
+		slog.Error("checker: update latency_alert_sent_at failed", "monitor_id", m.ID, "err", err)
+		return
+	}
+
+	user, err := c.store.GetUserByMonitorID(m.ID)
+	if err != nil {
+		slog.Error("checker: get user for latency alert failed", "monitor_id", m.ID, "err", err)
+		return
+	}
+	if c.mailer == nil || user.Email == "" {
+		return
+	}
+	if err := c.mailer.SendLatencyAlert(user.Email, m.Name, m.URL, latencyMs, m.LatencyThresholdMs); err != nil {
+		slog.Error("checker: send latency alert failed", "to", user.Email, "err", err)
+	} else {
+		slog.Info("checker: latency alert sent", "to", user.Email, "monitor", m.Name,
+			"latency_ms", latencyMs, "threshold_ms", m.LatencyThresholdMs)
+	}
+}
+
 func (c *Checker) handleRecovery(m Monitor, downDur time.Duration) {
 	if err := c.store.ResolveOutage(m.ID, time.Now()); err != nil {
 		slog.Error("checker: resolve outage failed", "monitor_id", m.ID, "err", err)

@@ -28,6 +28,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Seed demo account if credentials are provided via environment.
+	if demoEmail := os.Getenv("DEMO_EMAIL"); demoEmail != "" {
+		demoPass := os.Getenv("DEMO_PASSWORD")
+		if demoPass == "" {
+			demoPass = "demo-password"
+		}
+		hash, hashErr := HashPassword(demoPass)
+		if hashErr == nil {
+			if seedErr := store.SeedDemoAccount(demoEmail, hash, 50); seedErr != nil {
+				slog.Error("demo account seed failed", "err", seedErr)
+			} else {
+				slog.Info("demo account ready", "email", demoEmail, "max_monitors", 50)
+			}
+		}
+	}
+
 	hub := newHub()
 	go hub.run()
 

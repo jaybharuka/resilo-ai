@@ -220,6 +220,55 @@ func Open(path string) (*Store, error) {
 		}
 	}
 
+	// Migration: add latency_threshold_ms and latency_alert_sent_at to monitors.
+	monCols2 := map[string]bool{}
+	mon2Rows, _ := db.Query(`PRAGMA table_info(monitors)`)
+	if mon2Rows != nil {
+		for mon2Rows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if mon2Rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil {
+				monCols2[name] = true
+			}
+		}
+		mon2Rows.Close()
+	}
+	for _, colDef := range []struct{ name, ddl string }{
+		{"latency_threshold_ms", "ALTER TABLE monitors ADD COLUMN latency_threshold_ms INTEGER"},
+		{"latency_alert_sent_at", "ALTER TABLE monitors ADD COLUMN latency_alert_sent_at DATETIME"},
+	} {
+		if !monCols2[colDef.name] {
+			if _, err := db.Exec(colDef.ddl); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate monitors.%s: %w", colDef.name, err)
+			}
+			slog.Info("store: migrated monitors column", "col", colDef.name)
+		}
+	}
+
+	// Migration: add max_monitors column to users if it doesn't exist.
+	var hasMaxMonitors bool
+	umRows, _ := db.Query(`PRAGMA table_info(users)`)
+	if umRows != nil {
+		for umRows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if umRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil && name == "max_monitors" {
+				hasMaxMonitors = true
+			}
+		}
+		umRows.Close()
+	}
+	if !hasMaxMonitors {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN max_monitors INTEGER NOT NULL DEFAULT 10`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate users.max_monitors: %w", err)
+		}
+		slog.Info("store: migrated users.max_monitors column")
+	}
+
 	slog.Info("store opened", "path", path, "max_open_conns", 10, "max_idle_conns", 5)
 	return &Store{db: db}, nil
 }
@@ -287,6 +336,7 @@ type User struct {
 	Email        string
 	PasswordHash string
 	Slug         string
+	MaxMonitors  int
 	CreatedAt    time.Time
 }
 
@@ -319,14 +369,43 @@ func deriveSlug(email string) string {
 func (s *Store) CreateUser(email, passwordHash string) (User, error) {
 	id := GenerateToken()[:16]
 	slug := s.uniqueSlug(deriveSlug(email))
+	const defaultMax = 10
 	_, err := s.db.Exec(
-		`INSERT INTO users (id, email, password_hash, slug) VALUES (?, ?, ?, ?)`,
-		id, email, passwordHash, slug,
+		`INSERT INTO users (id, email, password_hash, slug, max_monitors) VALUES (?, ?, ?, ?, ?)`,
+		id, email, passwordHash, slug, defaultMax,
 	)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
-	return User{ID: id, Email: email, PasswordHash: passwordHash, Slug: slug, CreatedAt: time.Now()}, nil
+	return User{ID: id, Email: email, PasswordHash: passwordHash, Slug: slug, MaxMonitors: defaultMax, CreatedAt: time.Now()}, nil
+}
+
+// SetUserMaxMonitors updates the monitor limit for a user (used by demo seeding / admin).
+func (s *Store) SetUserMaxMonitors(userID string, max int) error {
+	_, err := s.db.Exec(`UPDATE users SET max_monitors = ? WHERE id = ?`, max, userID)
+	return err
+}
+
+// GetMonitorCount returns how many monitors a user currently has.
+func (s *Store) GetMonitorCount(userID string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM monitors WHERE user_id = ? AND enabled = 1`, userID).Scan(&n)
+	return n, err
+}
+
+// SeedDemoAccount creates or updates a demo user with elevated monitor limit.
+// If the user already exists only max_monitors is updated.
+func (s *Store) SeedDemoAccount(email, passwordHash string, maxMonitors int) error {
+	existing, err := s.GetUserByEmail(email)
+	if err == nil {
+		// Already exists — just ensure the limit is right.
+		return s.SetUserMaxMonitors(existing.ID, maxMonitors)
+	}
+	u, err := s.CreateUser(email, passwordHash)
+	if err != nil {
+		return err
+	}
+	return s.SetUserMaxMonitors(u.ID, maxMonitors)
 }
 
 // uniqueSlug returns base if it's free, otherwise base-2, base-3, etc.
@@ -363,8 +442,8 @@ func (s *Store) GetUserByEmail(email string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(
-		`SELECT id, email, password_hash, COALESCE(slug,''), created_at FROM users WHERE email = ?`, email,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
+		`SELECT id, email, password_hash, COALESCE(slug,''), COALESCE(max_monitors,10), created_at FROM users WHERE email = ?`, email,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &u.MaxMonitors, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
@@ -391,12 +470,12 @@ func (s *Store) GetUserBySession(token string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(`
-		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), u.created_at
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), COALESCE(u.max_monitors,10), u.created_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = ? AND s.expires_at > ?`,
 		token, time.Now().UTC().Format(time.RFC3339),
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &u.MaxMonitors, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
@@ -415,11 +494,11 @@ func (s *Store) GetUserByMonitorID(monitorID string) (User, error) {
 	var u User
 	var createdAt string
 	err := s.db.QueryRow(`
-		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), u.created_at
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.slug,''), COALESCE(u.max_monitors,10), u.created_at
 		FROM users u
 		JOIN monitors m ON m.user_id = u.id
 		WHERE m.id = ?`, monitorID,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &createdAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &u.MaxMonitors, &createdAt)
 	if err != nil {
 		return User{}, err
 	}
@@ -507,19 +586,21 @@ func (s *Store) GetDailyUptime(monitorID string, days int) ([]float64, error) {
 
 // Monitor is a URL the user wants to check on a schedule.
 type Monitor struct {
-	ID              string  `json:"id"`
-	UserID          string  `json:"user_id"`
-	Name            string  `json:"name"`
-	URL             string  `json:"url"`
-	Keyword         string  `json:"keyword"`
-	IntervalSeconds int     `json:"interval_seconds"`
-	Enabled         bool    `json:"enabled"`
-	CreatedAt       string  `json:"created_at"`
-	LastStatus      *int    `json:"last_status"`
-	LastLatencyMs   *int    `json:"last_latency_ms"`
-	LastError       *string `json:"last_error"`
-	LastCheckedAt   *string `json:"last_checked_at"`
-	SSLExpiry       *string `json:"ssl_expiry"`
+	ID                  string  `json:"id"`
+	UserID              string  `json:"user_id"`
+	Name                string  `json:"name"`
+	URL                 string  `json:"url"`
+	Keyword             string  `json:"keyword"`
+	IntervalSeconds     int     `json:"interval_seconds"`
+	LatencyThresholdMs  int     `json:"latency_threshold_ms"`
+	Enabled             bool    `json:"enabled"`
+	CreatedAt           string  `json:"created_at"`
+	LastStatus          *int    `json:"last_status"`
+	LastLatencyMs       *int    `json:"last_latency_ms"`
+	LastError           *string `json:"last_error"`
+	LastCheckedAt       *string `json:"last_checked_at"`
+	SSLExpiry           *string `json:"ssl_expiry"`
+	LatencyAlertSentAt  *string `json:"latency_alert_sent_at"`
 }
 
 // MonitorResult is one check outcome for a monitor.
@@ -536,29 +617,35 @@ type MonitorResult struct {
 }
 
 // CreateMonitor inserts a new monitor row.
-func (s *Store) CreateMonitor(userID, name, url, keyword string, intervalSeconds int) (Monitor, error) {
+func (s *Store) CreateMonitor(userID, name, url, keyword string, intervalSeconds, latencyThresholdMs int) (Monitor, error) {
 	id := GenerateToken()[:16]
 	now := time.Now().UTC().Format(time.RFC3339)
 	var kwVal interface{}
 	if keyword != "" {
 		kwVal = keyword
 	}
+	var ltVal interface{}
+	if latencyThresholdMs > 0 {
+		ltVal = latencyThresholdMs
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO monitors (id, user_id, name, url, keyword, interval_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, userID, name, url, kwVal, intervalSeconds, now,
+		`INSERT INTO monitors (id, user_id, name, url, keyword, interval_seconds, latency_threshold_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, name, url, kwVal, intervalSeconds, ltVal, now,
 	)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
-	return Monitor{ID: id, UserID: userID, Name: name, URL: url, Keyword: keyword, IntervalSeconds: intervalSeconds, Enabled: true, CreatedAt: now}, nil
+	return Monitor{ID: id, UserID: userID, Name: name, URL: url, Keyword: keyword, IntervalSeconds: intervalSeconds, LatencyThresholdMs: latencyThresholdMs, Enabled: true, CreatedAt: now}, nil
 }
 
 // GetMonitorsByUser returns all monitors for a user with the latest result joined.
 func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT m.id, m.user_id, m.name, m.url, COALESCE(m.keyword,''), m.interval_seconds, m.enabled, m.created_at,
+		SELECT m.id, m.user_id, m.name, m.url, COALESCE(m.keyword,''), m.interval_seconds,
+		       COALESCE(m.latency_threshold_ms, 0),
+		       m.enabled, m.created_at,
 		       r.status_code, r.latency_ms, r.error, r.checked_at,
-		       m.ssl_expiry
+		       m.ssl_expiry, m.latency_alert_sent_at
 		FROM monitors m
 		LEFT JOIN monitor_results r ON r.id = (
 		    SELECT id FROM monitor_results WHERE monitor_id = m.id ORDER BY checked_at DESC LIMIT 1
@@ -575,9 +662,11 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 		var m Monitor
 		var enabled int
 		if err := rows.Scan(
-			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds, &enabled, &m.CreatedAt,
+			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds,
+			&m.LatencyThresholdMs,
+			&enabled, &m.CreatedAt,
 			&m.LastStatus, &m.LastLatencyMs, &m.LastError, &m.LastCheckedAt,
-			&m.SSLExpiry,
+			&m.SSLExpiry, &m.LatencyAlertSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -590,7 +679,9 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 // GetAllEnabledMonitors returns all enabled monitors across all users (used by checker).
 func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, name, url, COALESCE(keyword,''), interval_seconds, enabled, created_at
+		SELECT id, user_id, name, url, COALESCE(keyword,''), interval_seconds,
+		       COALESCE(latency_threshold_ms, 0),
+		       enabled, created_at, latency_alert_sent_at
 		FROM monitors WHERE enabled = 1`)
 	if err != nil {
 		return nil, err
@@ -601,7 +692,11 @@ func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 	for rows.Next() {
 		var m Monitor
 		var enabled int
-		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds, &enabled, &m.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds,
+			&m.LatencyThresholdMs,
+			&enabled, &m.CreatedAt, &m.LatencyAlertSentAt,
+		); err != nil {
 			return nil, err
 		}
 		m.Enabled = enabled == 1
@@ -617,14 +712,18 @@ func (s *Store) DeleteMonitor(id, userID string) error {
 }
 
 // UpdateMonitor updates editable fields on a monitor owned by the given user.
-func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSeconds int) error {
+func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSeconds, latencyThresholdMs int) error {
 	var kwVal interface{}
 	if keyword != "" {
 		kwVal = keyword
 	}
+	var ltVal interface{}
+	if latencyThresholdMs > 0 {
+		ltVal = latencyThresholdMs
+	}
 	res, err := s.db.Exec(
-		`UPDATE monitors SET name = ?, url = ?, keyword = ?, interval_seconds = ? WHERE id = ? AND user_id = ?`,
-		name, url, kwVal, intervalSeconds, id, userID,
+		`UPDATE monitors SET name = ?, url = ?, keyword = ?, interval_seconds = ?, latency_threshold_ms = ? WHERE id = ? AND user_id = ?`,
+		name, url, kwVal, intervalSeconds, ltVal, id, userID,
 	)
 	if err != nil {
 		return err
@@ -632,6 +731,45 @@ func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSec
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("monitor not found or not owned by user")
+	}
+	return nil
+}
+
+// UpdateLatencyAlertSent sets or clears the latency_alert_sent_at timestamp.
+func (s *Store) UpdateLatencyAlertSent(monitorID string, sentAt *time.Time) error {
+	var val interface{}
+	if sentAt != nil {
+		val = sentAt.UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.Exec(`UPDATE monitors SET latency_alert_sent_at = ? WHERE id = ?`, val, monitorID)
+	return err
+}
+
+// UpdatePassword sets a new bcrypt hash for the user.
+func (s *Store) UpdatePassword(userID, newHash string) error {
+	_, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, newHash, userID)
+	return err
+}
+
+// UpdateEmail changes the user's email address.
+func (s *Store) UpdateEmail(userID, newEmail string) error {
+	_, err := s.db.Exec(`UPDATE users SET email = ? WHERE id = ?`, newEmail, userID)
+	return err
+}
+
+// DeleteAccount removes all data belonging to userID in FK-safe order.
+func (s *Store) DeleteAccount(userID string) error {
+	stmts := []string{
+		`DELETE FROM monitor_results WHERE monitor_id IN (SELECT id FROM monitors WHERE user_id = ?)`,
+		`DELETE FROM outages         WHERE monitor_id IN (SELECT id FROM monitors WHERE user_id = ?)`,
+		`DELETE FROM monitors        WHERE user_id = ?`,
+		`DELETE FROM sessions        WHERE user_id = ?`,
+		`DELETE FROM users           WHERE id = ?`,
+	}
+	for _, stmt := range stmts {
+		if _, err := s.db.Exec(stmt, userID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
