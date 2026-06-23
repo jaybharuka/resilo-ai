@@ -731,14 +731,6 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, mailer
 		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
 	}))))))
 
-	// Monitor routes — session-cookie auth.
-	mux.HandleFunc("GET /api/monitors", monitorsListHandler(store))
-	mux.HandleFunc("POST /api/monitors", monitorsCreateHandler(store))
-	mux.HandleFunc("PUT /api/monitors/{id}", monitorsUpdateHandler(store))
-	mux.HandleFunc("DELETE /api/monitors/{id}", monitorsDeleteHandler(store))
-	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
-	mux.HandleFunc("GET /api/monitors/{id}/outages", monitorsOutagesHandler(store))
-
 	// Profile routes — session-cookie auth.
 	mux.HandleFunc("PUT /api/profile/slug", profileSlugHandler(store))
 
@@ -758,6 +750,48 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, mailer
 		http.ServeFile(w, r, "static/incidents.html")
 	}))
 	mux.HandleFunc("GET /api/incidents", incidentsHandler(store))
+
+	// System incidents — new incidents table (session-cookie auth).
+	mux.HandleFunc("GET /api/system/incidents", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := currentUser(store, w, r); !ok {
+			return
+		}
+		limit := 20
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err2 := strconv.Atoi(l); err2 == nil && n > 0 && n <= 100 {
+				limit = n
+			}
+		}
+		incs, err := store.GetRecentIncidents(limit)
+		if err != nil {
+			slog.Error("GetRecentIncidents failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if incs == nil {
+			incs = []Incident{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(incs)
+	})
+
+	// Prometheus snapshot for any job label — used by the service selector.
+	mux.HandleFunc("GET /api/prom/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := currentUser(store, w, r); !ok {
+			return
+		}
+		job := r.URL.Query().Get("job")
+		if job == "" {
+			job = "prod-api"
+		}
+		snap, err := sim.FetchJobSnapshot(job)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(snap)
+	})
 
 	// Account management routes — session-cookie auth.
 	mux.HandleFunc("GET /api/account/me", accountMeHandler(store))
@@ -792,206 +826,6 @@ func currentUser(store *Store, w http.ResponseWriter, r *http.Request) (User, bo
 		return User{}, false
 	}
 	return user, true
-}
-
-func monitorsListHandler(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		monitors, err := store.GetMonitorsByUser(user.ID)
-		if err != nil {
-			slog.Error("GetMonitorsByUser failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		if monitors == nil {
-			monitors = []Monitor{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(monitors)
-	}
-}
-
-func monitorsCreateHandler(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		var req struct {
-			Name               string `json:"name"`
-			URL                string `json:"url"`
-			Keyword            string `json:"keyword"`
-			IntervalSeconds    int    `json:"interval_seconds"`
-			LatencyThresholdMs int    `json:"latency_threshold_ms"`
-			Method             string `json:"method"`
-			RequestBody        string `json:"request_body"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
-			return
-		}
-		if req.Name == "" || req.URL == "" {
-			http.Error(w, "name and url are required", http.StatusBadRequest)
-			return
-		}
-		if req.IntervalSeconds <= 0 {
-			req.IntervalSeconds = 60
-		}
-		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true, "HEAD": true}
-		if req.Method == "" {
-			req.Method = "GET"
-		} else if !validMethods[req.Method] {
-			jsonErr(w, http.StatusBadRequest, "method must be one of GET, POST, PUT, DELETE, HEAD")
-			return
-		}
-		count, err := store.GetMonitorCount(user.ID)
-		if err != nil {
-			slog.Error("GetMonitorCount failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		if count >= user.MaxMonitors {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":        "monitor limit reached",
-				"limit":        user.MaxMonitors,
-				"upgrade_hint": "Contact us to increase your limit",
-			})
-			return
-		}
-		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.Method, req.RequestBody, req.IntervalSeconds, req.LatencyThresholdMs)
-		if err != nil {
-			slog.Error("CreateMonitor failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(m)
-	}
-}
-
-func monitorsUpdateHandler(store *Store) http.HandlerFunc {
-	validIntervals := map[int]bool{60: true, 300: true, 600: true, 1800: true}
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		id := r.PathValue("id")
-		var req struct {
-			Name               string `json:"name"`
-			URL                string `json:"url"`
-			Keyword            string `json:"keyword"`
-			IntervalSeconds    int    `json:"interval_seconds"`
-			LatencyThresholdMs int    `json:"latency_threshold_ms"`
-			Method             string `json:"method"`
-			RequestBody        string `json:"request_body"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
-			return
-		}
-		if l := len(req.Name); l == 0 || l > 50 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "name must be 1–50 characters"})
-			return
-		}
-		if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "URL must start with http:// or https://"})
-			return
-		}
-		if !validIntervals[req.IntervalSeconds] {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "interval must be 60, 300, 600, or 1800 seconds"})
-			return
-		}
-		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true, "HEAD": true}
-		if req.Method == "" {
-			req.Method = "GET"
-		} else if !validMethods[req.Method] {
-			jsonErr(w, http.StatusBadRequest, "method must be one of GET, POST, PUT, DELETE, HEAD")
-			return
-		}
-		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.Method, req.RequestBody, req.IntervalSeconds, req.LatencyThresholdMs); err != nil {
-			slog.Error("UpdateMonitor failed", "err", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
-	}
-}
-
-func monitorsDeleteHandler(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		id := r.PathValue("id")
-		if err := store.DeleteMonitor(id, user.ID); err != nil {
-			slog.Error("DeleteMonitor failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
-	}
-}
-
-func monitorsResultsHandler(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		id := r.PathValue("id")
-		results, err := store.GetRecentResults(id, 50)
-		if err != nil {
-			slog.Error("GetRecentResults failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		if results == nil {
-			results = []MonitorResult{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
-	}
-}
-
-func monitorsOutagesHandler(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := currentUser(store, w, r)
-		if !ok {
-			return
-		}
-		id := r.PathValue("id")
-		outages, err := store.GetOutagesByMonitor(id, 10)
-		if err != nil {
-			slog.Error("GetOutagesByMonitor failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
-			return
-		}
-		if outages == nil {
-			outages = []Outage{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(outages)
-	}
 }
 
 func incidentsHandler(store *Store) http.HandlerFunc {
