@@ -3,611 +3,297 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AIOps Bot — Ops Dashboard</title>
+  <title>Resilo — AI-Powered Uptime Monitoring</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:        #0d1117;
-      --surface:   #161b22;
-      --surface2:  #21262d;
-      --border:    #30363d;
-      --text:      #e6edf3;
-      --muted:     #8b949e;
-      --accent:    #58a6ff;
-      --green:     #3fb950;
-      --yellow:    #d29922;
-      --red:       #f85149;
-      --purple:    #bc8cff;
-      --orange:    #ffa657;
-      --font:      'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-    }
-
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 13px;
-      height: 100vh;
-      display: grid;
-      grid-template-rows: 52px 1fr;
-      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
     }
 
-    /* ── Header ── */
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Nav ── */
+    nav {
       display: flex;
       align-items: center;
-      padding: 0 20px;
-      gap: 16px;
+      padding: 18px 40px;
+      border-bottom: 1px solid #21262d;
     }
-    header .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
-    header .logo span { color: var(--muted); font-weight: 400; }
-    .ws-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background .3s; }
-    .ws-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    header .spacer { flex: 1; }
-    header .ts { font-size: 11px; color: var(--muted); }
+    .nav-logo {
+      font-size: 18px;
+      font-weight: 700;
+      color: #e6edf3;
+      letter-spacing: -0.5px;
+    }
+    .nav-logo span { color: #58a6ff; }
+    .nav-links { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .btn {
+      display: inline-block;
+      padding: 7px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-ghost {
+      background: none;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+    }
+    .btn-ghost:hover { border-color: #58a6ff; color: #58a6ff; text-decoration: none; }
+    .btn-primary {
+      background: #238636;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #2ea043; text-decoration: none; }
 
-    /* ── Main grid ── */
-    main {
-      display: grid;
-      grid-template-columns: 300px 1fr 340px;
-      grid-template-rows: auto 1fr;
-      gap: 1px;
-      background: var(--border);
-      overflow: hidden;
+    /* ── Hero ── */
+    .hero {
+      max-width: 760px;
+      margin: 80px auto 60px;
+      text-align: center;
+      padding: 0 24px;
     }
-
-    /* ── Panels ── */
-    .panel {
-      background: var(--bg);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .panel-header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 14px;
+    .hero-badge {
+      display: inline-block;
+      background: #1b2d1f;
+      border: 1px solid #238636;
+      color: #3fb950;
       font-size: 11px;
       font-weight: 600;
-      color: var(--muted);
-      letter-spacing: .8px;
+      letter-spacing: .5px;
       text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(32px, 6vw, 52px);
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -1px;
+      margin-bottom: 20px;
+    }
+    .hero h1 .accent { color: #58a6ff; }
+    .hero p {
+      font-size: 17px;
+      color: #8b949e;
+      line-height: 1.7;
+      max-width: 540px;
+      margin: 0 auto 36px;
+    }
+    .hero-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn-large { padding: 12px 28px; font-size: 15px; border-radius: 8px; }
+
+    /* ── Features ── */
+    .features {
+      max-width: 900px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .feature-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .feature-icon { font-size: 24px; margin-bottom: 12px; }
+    .feature-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+    .feature-card p { font-size: 13px; color: #8b949e; line-height: 1.6; }
+
+    /* ── Status preview ── */
+    .preview {
+      max-width: 680px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+    .preview-label {
+      text-align: center;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: #8b949e;
+      margin-bottom: 20px;
+    }
+    .preview-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .preview-header {
+      background: #1b2d1f;
+      border-bottom: 1px solid #238636;
+      padding: 14px 20px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #3fb950;
     }
-    .panel-header .badge {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1px 7px;
-      font-size: 10px;
-      color: var(--text);
-    }
-    .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
-    .panel-body::-webkit-scrollbar { width: 4px; }
-    .panel-body::-webkit-scrollbar-track { background: transparent; }
-    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    /* ── Metric cards (span full top row) ── */
-    .metrics-row {
-      grid-column: 1 / -1;
-      background: var(--bg);
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .metric-card {
-      background: var(--surface);
-      padding: 16px 18px 12px;
-      position: relative;
+    .preview-dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 6px #3fb95080; }
+    .preview-row {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-      transition: background .2s;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid #21262d;
+      gap: 12px;
+      font-size: 13px;
     }
-    .metric-card.warning  { border-top: 2px solid var(--yellow); }
-    .metric-card.critical { border-top: 2px solid var(--red); box-shadow: inset 0 0 30px rgba(248,81,73,.04); }
-    .metric-card.normal   { border-top: 2px solid transparent; }
-    .metric-label { font-size: 10px; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; }
-    .metric-value { font-size: 32px; font-weight: 700; line-height: 1; transition: color .3s; }
-    .metric-value.normal   { color: var(--green); }
-    .metric-value.warning  { color: var(--yellow); }
-    .metric-value.critical { color: var(--red); }
-    .metric-unit { font-size: 13px; color: var(--muted); margin-left: 2px; }
-    .metric-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
-    .sparkline-wrap { margin-top: 8px; }
-    svg.sparkline { width: 100%; height: 36px; display: block; }
+    .preview-row:last-child { border-bottom: none; }
+    .up-badge   { background: #1b2d1f; color: #3fb950; border: 1px solid #238636; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .down-badge { background: #2d1b1b; color: #f85149; border: 1px solid #8b1a1a; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .preview-name { flex: 1; }
+    .preview-bar { display: flex; gap: 2px; }
+    .preview-bar span { display: inline-block; width: 8px; height: 18px; border-radius: 2px; background: #238636; }
+    .preview-bar span.r { background: #8b1a1a; }
+    .preview-bar span.g { background: #21262d; }
+    .preview-pct { font-size: 11px; color: #8b949e; width: 46px; text-align: right; }
 
-    /* ── Alert feed ── */
-    .alert-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      animation: slideIn .25s ease;
-    }
-    .alert-item.critical { border-left: 3px solid var(--red); }
-    .alert-item.warning  { border-left: 3px solid var(--yellow); }
-    @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
-    .alert-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .alert-metric { font-size: 11px; font-weight: 700; }
-    .alert-metric.critical { color: var(--red); }
-    .alert-metric.warning  { color: var(--yellow); }
-    .alert-sev { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 600; letter-spacing: .5px; }
-    .alert-sev.critical { background: rgba(248,81,73,.2); color: var(--red); }
-    .alert-sev.warning  { background: rgba(210,153,34,.2); color: var(--yellow); }
-    .alert-msg { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
-    .alert-ts  { font-size: 9px; color: var(--muted); margin-top: 4px; }
-    .alert-id  { font-size: 9px; color: var(--accent); }
-
-    /* ── Trigger buttons ── */
-    .trigger-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-    .btn {
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-family: var(--font);
-      font-size: 11px;
-      cursor: pointer;
-      background: var(--surface2);
-      color: var(--text);
-      transition: all .15s;
+    /* ── CTA strip ── */
+    .cta-strip {
       text-align: center;
+      padding: 60px 24px 80px;
+      border-top: 1px solid #21262d;
     }
-    .btn:hover { filter: brightness(1.3); }
-    .btn.active { border-color: var(--red); background: rgba(248,81,73,.15); color: var(--red); }
-    .btn-reset {
-      grid-column: 1 / -1;
-      background: var(--surface);
-      border-color: var(--green);
-      color: var(--green);
-    }
-    .btn-reset:hover { background: rgba(63,185,80,.12); }
+    .cta-strip h2 { font-size: 26px; font-weight: 700; margin-bottom: 12px; }
+    .cta-strip p { color: #8b949e; margin-bottom: 28px; font-size: 15px; }
 
-    /* ── ChatOps / AI panel ── */
-    .ai-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 10px;
-      animation: slideIn .3s ease;
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid #21262d;
+      text-align: center;
+      padding: 20px;
+      font-size: 12px;
+      color: #8b949e;
     }
-    .ai-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .ai-icon { font-size: 16px; }
-    .ai-alert-id { font-size: 10px; color: var(--accent); font-weight: 700; }
-    .ai-conf { font-size: 9px; padding: 2px 6px; border-radius: 3px; margin-left: auto; }
-    .ai-conf.high   { background: rgba(63,185,80,.2);  color: var(--green); }
-    .ai-conf.medium { background: rgba(210,153,34,.2); color: var(--yellow); }
-    .ai-conf.low    { background: rgba(248,81,73,.2);  color: var(--red); }
-    .ai-section-title { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 4px; margin-top: 8px; }
-    .ai-text { font-size: 11px; color: var(--text); line-height: 1.55; }
-    .ai-ts { font-size: 9px; color: var(--muted); margin-top: 8px; }
-    .ai-loading { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
-    .spinner { width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .ai-error { font-size: 11px; color: var(--red); }
-    .empty-state { color: var(--muted); font-size: 11px; text-align: center; padding: 24px 0; }
-
-    /* ── Divider ── */
-    .divider { height: 1px; background: var(--border); margin: 10px 0; }
   </style>
 </head>
 <body>
 
-<header>
-  <div class="logo">AIOps<span>Bot</span></div>
-  <div class="ws-status">
-    <div class="ws-dot" id="wsDot"></div>
-    <span id="wsLabel">Connecting…</span>
+<nav>
+  <div class="nav-logo">Res<span>i</span>lo</div>
+  <div class="nav-links">
+    <a href="/login"  class="btn btn-ghost">Sign in</a>
+    <a href="/signup" class="btn btn-primary">Get started free</a>
   </div>
-  <div class="spacer"></div>
-  <div class="ts" id="clockEl"></div>
-</header>
+</nav>
 
-<main>
-  <!-- ── Metric cards ── -->
-  <div class="metrics-row" id="metricsRow">
-    <!-- injected by JS -->
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">AI-Powered Monitoring</div>
+  <h1>Know when your sites go down — <span class="accent">before your users do</span></h1>
+  <p>Resilo monitors your URLs every minute, diagnoses outages with AI, and sends instant email alerts with root cause analysis and remediation steps.</p>
+  <div class="hero-cta">
+    <a href="/signup" class="btn btn-primary btn-large">Start monitoring for free</a>
+    <a href="/login"  class="btn btn-ghost  btn-large">Sign in</a>
   </div>
+</section>
 
-  <!-- ── Alert feed ── -->
-  <div class="panel">
-    <div class="panel-header">
-      ⚡ Alert Feed
-      <span class="badge" id="alertCount">0</span>
+<!-- Features -->
+<section class="features">
+  <div class="feature-card">
+    <div class="feature-icon">⚡</div>
+    <h3>Real-time checks</h3>
+    <p>HTTP checks every 60 seconds. Latency, status codes, and error messages captured on every probe.</p>
+  </div>
+  <div class="feature-card">
+    <div class="feature-icon">🤖</div>
+    <h3>AI root cause analysis</h3>
+    <p>When a monitor goes down, Claude AI diagnoses the outage and generates step-by-step remediation instructions.</p>
+  </div>
+  <div class="feature-card">
+    <div class="feature-icon">📧</div>
+    <h3>Instant email alerts</h3>
+    <p>Down and recovery emails with full AI analysis — sent the moment status changes, not on a delay.</p>
+  </div>
+  <div class="feature-card">
+    <div class="feature-icon">📊</div>
+    <h3>Public status page</h3>
+    <p>A shareable status page at <code style="font-size:11px;color:#58a6ff;">resilo-ai.fly.dev/status/you</code> with 30-day uptime history — no login required to view.</p>
+  </div>
+  <div class="feature-card">
+    <div class="feature-icon">🔔</div>
+    <h3>Outage history</h3>
+    <p>Every outage is logged with start time, duration, AI diagnosis, and resolution — all accessible from your dashboard.</p>
+  </div>
+  <div class="feature-card">
+    <div class="feature-icon">🛠️</div>
+    <h3>Zero config</h3>
+    <p>Add a URL, pick an interval, done. No agents to install, no YAML to write.</p>
+  </div>
+</section>
+
+<!-- Status page preview -->
+<section class="preview">
+  <div class="preview-label">What your status page looks like</div>
+  <div class="preview-card">
+    <div class="preview-header">
+      <span class="preview-dot"></span>
+      All Systems Operational
     </div>
-    <div class="panel-body" id="alertFeed">
-      <div class="empty-state" id="alertEmpty">No alerts yet</div>
+    <div class="preview-row">
+      <span class="up-badge">UP</span>
+      <span class="preview-name">Production API</span>
+      <span class="preview-bar">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span r></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <span class="preview-pct">99.8%</span>
+    </div>
+    <div class="preview-row">
+      <span class="up-badge">UP</span>
+      <span class="preview-name">Marketing Site</span>
+      <span class="preview-bar">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <span class="preview-pct">100%</span>
+    </div>
+    <div class="preview-row">
+      <span class="down-badge">DOWN</span>
+      <span class="preview-name">Staging Environment</span>
+      <span class="preview-bar">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span g></span><span g></span><span r></span><span r></span>
+      </span>
+      <span class="preview-pct">93.1%</span>
     </div>
   </div>
+</section>
 
-  <!-- ── Simulator controls (middle bottom) ── -->
-  <div class="panel">
-    <div class="panel-header">📊 Live Metrics &amp; Controls</div>
-    <div class="panel-body">
-      <div style="color:var(--muted);font-size:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.7px;">Trigger Scenarios</div>
-      <div class="trigger-grid">
-        <button class="btn" id="btnCPU"    onclick="trigger('cpu')">🔥 CPU Spike</button>
-        <button class="btn" id="btnMemory" onclick="trigger('memory')">💾 Memory Pressure</button>
-        <button class="btn" id="btnLatency" onclick="trigger('latency')">⏱ High Latency</button>
-        <button class="btn" id="btnError"  onclick="trigger('error')">🚨 Error Storm</button>
-        <button class="btn btn-reset"      onclick="resetAll()">✅ Reset All</button>
-      </div>
-      <div class="divider"></div>
-      <div style="color:var(--muted);font-size:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.7px;">Threshold Reference</div>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;">
-        <thead>
-          <tr style="color:var(--muted);">
-            <th style="text-align:left;padding:3px 0;">Metric</th>
-            <th style="text-align:right;padding:3px 0;">Warn</th>
-            <th style="text-align:right;padding:3px 0;">Crit</th>
-          </tr>
-        </thead>
-        <tbody style="color:var(--text);">
-          <tr><td>CPU</td><td style="text-align:right;color:var(--yellow);">70%</td><td style="text-align:right;color:var(--red);">85%</td></tr>
-          <tr><td>Memory</td><td style="text-align:right;color:var(--yellow);">65%</td><td style="text-align:right;color:var(--red);">80%</td></tr>
-          <tr><td>Latency</td><td style="text-align:right;color:var(--yellow);">800ms</td><td style="text-align:right;color:var(--red);">1500ms</td></tr>
-          <tr><td>Error Rate</td><td style="text-align:right;color:var(--yellow);">5%</td><td style="text-align:right;color:var(--red);">10%</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
+<!-- Bottom CTA -->
+<section class="cta-strip">
+  <h2>Start monitoring in 30 seconds</h2>
+  <p>Free to use. No credit card required.</p>
+  <a href="/signup" class="btn btn-primary btn-large">Create your account</a>
+</section>
 
-  <!-- ── ChatOps / AI responses ── -->
-  <div class="panel">
-    <div class="panel-header">
-      🤖 AI Analysis
-      <span class="badge" id="aiCount">0</span>
-    </div>
-    <div class="panel-body" id="aiPanel">
-      <div class="empty-state" id="aiEmpty">AI responses will appear when alerts fire</div>
-    </div>
-  </div>
-</main>
+<footer>
+  &copy; 2026 Resilo &nbsp;·&nbsp; <a href="/login">Sign in</a> &nbsp;·&nbsp; <a href="/signup">Sign up</a>
+</footer>
 
-<script>
-// ── Auth token (injected by the server into a meta tag) ─────────
-const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
-
-function authHeaders(extra) {
-  const h = Object.assign({}, extra);
-  if (AUTH_TOKEN) h['Authorization'] = `Bearer ${AUTH_TOKEN}`;
-  return h;
-}
-
-// ── Metric config ─────────────────────────────────────────────
-const METRICS = [
-  { key: 'cpu',        label: 'CPU Usage',   unit: '%',  warnT: 70, critT: 85,   color: '#58a6ff' },
-  { key: 'memory',     label: 'Memory',      unit: '%',  warnT: 65, critT: 80,   color: '#bc8cff' },
-  { key: 'latency',    label: 'Latency',     unit: 'ms', warnT: 800, critT: 1500, color: '#ffa657' },
-  { key: 'error_rate', label: 'Error Rate',  unit: '%',  warnT: 5,  critT: 10,   color: '#f85149' },
-];
-
-const HISTORY_LEN = 60; // sparkline points
-const history = {};
-METRICS.forEach(m => history[m.key] = []);
-
-// ── Build metric cards ─────────────────────────────────────────
-const metricsRow = document.getElementById('metricsRow');
-METRICS.forEach(m => {
-  const card = document.createElement('div');
-  card.className = 'metric-card normal';
-  card.id = `card-${m.key}`;
-  card.innerHTML = `
-    <div class="metric-label">${m.label}</div>
-    <div>
-      <span class="metric-value normal" id="val-${m.key}">—</span>
-      <span class="metric-unit">${m.unit}</span>
-    </div>
-    <div class="metric-sub" id="sub-${m.key}">waiting for data…</div>
-    <div class="sparkline-wrap">
-      <svg class="sparkline" id="spark-${m.key}" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
-    </div>
-  `;
-  metricsRow.appendChild(card);
-});
-
-// ── Sparkline renderer ─────────────────────────────────────────
-function renderSparkline(key, color) {
-  const svg = document.getElementById(`spark-${key}`);
-  const data = history[key];
-  if (data.length < 2) return;
-
-  const W = 200, H = 36, PAD = 2;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-
-  const pts = data.map((v, i) => {
-    const x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
-    const y = PAD + (1 - (v - min) / range) * (H - PAD * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-
-  const polyline = pts.join(' ');
-  const lastPt = pts[pts.length - 1].split(',');
-  const firstPt = pts[0].split(',');
-
-  svg.innerHTML = `
-    <defs>
-      <linearGradient id="grad-${key}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${color}" stop-opacity=".35"/>
-        <stop offset="100%" stop-color="${color}" stop-opacity=".02"/>
-      </linearGradient>
-    </defs>
-    <polygon
-      points="${polyline} ${lastPt[0]},${H} ${firstPt[0]},${H}"
-      fill="url(#grad-${key})"
-    />
-    <polyline
-      points="${polyline}"
-      fill="none"
-      stroke="${color}"
-      stroke-width="1.5"
-      stroke-linejoin="round"
-      stroke-linecap="round"
-    />
-    <circle cx="${lastPt[0]}" cy="${lastPt[1]}" r="2.5" fill="${color}"/>
-  `;
-}
-
-// ── Update metric card ─────────────────────────────────────────
-function updateCard(m, value) {
-  const cfg = METRICS.find(x => x.key === m);
-  if (!cfg) return;
-
-  history[m].push(value);
-  if (history[m].length > HISTORY_LEN) history[m].shift();
-
-  let status = 'normal';
-  if (value >= cfg.critT) status = 'critical';
-  else if (value >= cfg.warnT) status = 'warning';
-
-  const card = document.getElementById(`card-${m}`);
-  const valEl = document.getElementById(`val-${m}`);
-  const subEl = document.getElementById(`sub-${m}`);
-
-  card.className = `metric-card ${status}`;
-  valEl.className = `metric-value ${status}`;
-  valEl.textContent = value.toFixed(1);
-
-  const delta = history[m].length > 1
-    ? value - history[m][history[m].length - 2]
-    : 0;
-  const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '→';
-  const trend = Math.abs(delta).toFixed(2);
-  subEl.textContent = `${arrow} ${trend} ${cfg.unit}  |  ${status.toUpperCase()}`;
-
-  renderSparkline(m, cfg.color);
-}
-
-// ── Alert feed ─────────────────────────────────────────────────
-let alertCount = 0;
-const alertFeed = document.getElementById('alertFeed');
-const alertEmpty = document.getElementById('alertEmpty');
-const alertCountEl = document.getElementById('alertCount');
-
-function addAlert(a) {
-  if (alertEmpty) alertEmpty.remove();
-  alertCount++;
-  alertCountEl.textContent = alertCount;
-
-  const div = document.createElement('div');
-  div.className = `alert-item ${a.severity}`;
-  div.id = `alert-${a.id}`;
-  const ts = new Date(a.timestamp).toLocaleTimeString();
-  div.innerHTML = `
-    <div class="alert-top">
-      <span class="alert-metric ${a.severity}">${a.metric}</span>
-      <span class="alert-sev ${a.severity}">${a.severity.toUpperCase()}</span>
-    </div>
-    <div class="alert-msg">${a.message}</div>
-    <div class="alert-ts"><span class="alert-id">${a.id}</span> · ${ts}</div>
-  `;
-  alertFeed.insertBefore(div, alertFeed.firstChild);
-
-  // Cap feed at 50 items
-  while (alertFeed.children.length > 50) {
-    alertFeed.removeChild(alertFeed.lastChild);
-  }
-}
-
-// ── AI panel ──────────────────────────────────────────────────
-let aiCount = 0;
-const aiPanel = document.getElementById('aiPanel');
-const aiEmpty = document.getElementById('aiEmpty');
-const aiCountEl = document.getElementById('aiCount');
-
-// Show pending spinner for an alert
-function addAIPending(alertId) {
-  if (aiEmpty) aiEmpty.remove();
-  const existing = document.getElementById(`ai-${alertId}`);
-  if (existing) return;
-
-  const div = document.createElement('div');
-  div.className = 'ai-item';
-  div.id = `ai-${alertId}`;
-  div.innerHTML = `
-    <div class="ai-header">
-      <span class="ai-icon">🤖</span>
-      <span class="ai-alert-id">${alertId}</span>
-    </div>
-    <div class="ai-loading"><div class="spinner"></div> Analyzing with Claude…</div>
-  `;
-  aiPanel.insertBefore(div, aiPanel.firstChild);
-}
-
-function addAIResponse(r) {
-  if (r.error) {
-    const div = document.getElementById(`ai-${r.alert_id}`);
-    if (div) {
-      div.querySelector('.ai-loading, .ai-error') &&
-        (div.innerHTML += `<div class="ai-error">⚠ ${r.error}</div>`);
-    }
-    return;
-  }
-
-  aiCount++;
-  aiCountEl.textContent = aiCount;
-
-  let div = document.getElementById(`ai-${r.alert_id}`);
-  if (!div) {
-    if (aiEmpty) aiEmpty.remove();
-    div = document.createElement('div');
-    div.className = 'ai-item';
-    div.id = `ai-${r.alert_id}`;
-    aiPanel.insertBefore(div, aiPanel.firstChild);
-  }
-
-  const confClass = r.confidence || 'low';
-  const ts = new Date(r.timestamp).toLocaleTimeString();
-  div.innerHTML = `
-    <div class="ai-header">
-      <span class="ai-icon">🤖</span>
-      <span class="ai-alert-id">${r.alert_id}</span>
-      <span class="ai-conf ${confClass}">${(r.confidence||'?').toUpperCase()}</span>
-    </div>
-    <div class="ai-section-title">Root Cause</div>
-    <div class="ai-text">${escHtml(r.root_cause || '')}</div>
-    <div class="ai-section-title">Remediation</div>
-    <div class="ai-text">${formatRemediation(r.remediation || '')}</div>
-    <div class="ai-ts">Model: ${r.model || '—'} · ${ts}</div>
-  `;
-
-  while (aiPanel.children.length > 20) aiPanel.removeChild(aiPanel.lastChild);
-}
-
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function formatRemediation(s) {
-  if (!s) return '';
-  // Handle JSON array (model sometimes returns ["step1","step2"])
-  if (s.trim().startsWith('[')) {
-    try {
-      const arr = JSON.parse(s);
-      if (Array.isArray(arr)) {
-        return arr.map(l => `<div style="padding:2px 0;">• ${escHtml(String(l).replace(/^\d+\.\s*/,''))}</div>`).join('');
-      }
-    } catch (_) {}
-  }
-  // Split on newlines or on "N." sentence boundaries
-  const escaped = escHtml(s);
-  let lines = escaped.split(/\n/).filter(l => l.trim());
-  if (lines.length <= 1) {
-    // Try splitting on numbered sentence pattern: "1. ... 2. ..."
-    lines = escaped.split(/(?=\d+\.\s)/).filter(l => l.trim());
-  }
-  if (lines.length <= 1) return `<span>${lines[0] || escaped}</span>`;
-  return lines.map(l => `<div style="padding:2px 0;">• ${l.replace(/^\d+\.\s*/,'').trim()}</div>`).join('');
-}
-
-// ── Trigger buttons ─────────────────────────────────────────────
-const triggerState = { cpu: false, memory: false, latency: false, error: false };
-
-function trigger(type) {
-  triggerState[type] = !triggerState[type];
-
-  const map = { cpu: 'btnCPU', memory: 'btnMemory', latency: 'btnLatency', error: 'btnError' };
-  document.getElementById(map[type]).classList.toggle('active', triggerState[type]);
-
-  fetch('/api/trigger', {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      cpu:        triggerState.cpu,
-      memory:     triggerState.memory,
-      latency:    triggerState.latency,
-      error_rate: triggerState.error,
-    }),
-  });
-}
-
-function resetAll() {
-  Object.keys(triggerState).forEach(k => triggerState[k] = false);
-  ['btnCPU','btnMemory','btnLatency','btnError'].forEach(id =>
-    document.getElementById(id).classList.remove('active')
-  );
-  fetch('/api/reset', { method: 'POST', headers: authHeaders() });
-}
-
-// ── Clock ───────────────────────────────────────────────────────
-const clockEl = document.getElementById('clockEl');
-function updateClock() {
-  clockEl.textContent = new Date().toUTCString().replace('GMT','UTC');
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// ── WebSocket ───────────────────────────────────────────────────
-const wsDot = document.getElementById('wsDot');
-const wsLabel = document.getElementById('wsLabel');
-
-let ws, reconnectTimer;
-
-function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const tokenParam = AUTH_TOKEN ? `?token=${encodeURIComponent(AUTH_TOKEN)}` : '';
-  ws = new WebSocket(`${proto}://${location.host}/ws${tokenParam}`);
-
-  ws.onopen = () => {
-    wsDot.classList.add('connected');
-    wsLabel.textContent = 'Connected';
-    clearTimeout(reconnectTimer);
-  };
-
-  ws.onclose = () => {
-    wsDot.classList.remove('connected');
-    wsLabel.textContent = 'Reconnecting…';
-    reconnectTimer = setTimeout(connect, 2000);
-  };
-
-  ws.onerror = () => ws.close();
-
-  ws.onmessage = (evt) => {
-    let msg;
-    try { msg = JSON.parse(evt.data); } catch { return; }
-
-    switch (msg.type) {
-      case 'metrics': {
-        const p = msg.payload;
-        updateCard('cpu',        p.cpu);
-        updateCard('memory',     p.memory);
-        updateCard('latency',    p.latency);
-        updateCard('error_rate', p.error_rate);
-        break;
-      }
-      case 'alert': {
-        addAlert(msg.payload);
-        addAIPending(msg.payload.id);
-        break;
-      }
-      case 'ai_response': {
-        addAIResponse(msg.payload);
-        break;
-      }
-    }
-  };
-}
-
-connect();
-</script>
 </body>
 </html>
