@@ -8,25 +8,22 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0d1117;
-      --surface:   #161b22;
-      --surface2:  #21262d;
-      --border:    #30363d;
-      --text:      #e6edf3;
-      --muted:     #8b949e;
-      --accent:    #58a6ff;
-      --green:     #3fb950;
-      --yellow:    #d29922;
-      --red:       #f85149;
-      --purple:    #bc8cff;
-      --orange:    #ffa657;
-      --font:      'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --surface2: #21262d;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --yellow:   #d29922;
+      --red:      #f85149;
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: var(--font);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 13px;
       min-height: 100vh;
       display: flex;
@@ -40,37 +37,50 @@
       display: flex;
       align-items: center;
       padding: 0 20px;
-      gap: 16px;
+      gap: 14px;
       height: 52px;
       flex-shrink: 0;
       position: sticky;
       top: 0;
       z-index: 100;
     }
-    header .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
-    header .logo span { color: var(--muted); font-weight: 400; }
-    .ws-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background .3s; }
-    .ws-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    header .spacer { flex: 1; }
-    header .ts { font-size: 11px; color: var(--muted); }
+    .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+    .logo span { color: var(--muted); font-weight: 400; }
+    .spacer { flex: 1; }
+    .ts { font-size: 11px; color: var(--muted); }
     .btn-logout {
       background: transparent;
       border: 1px solid var(--border);
       border-radius: 5px;
       color: var(--muted);
       cursor: pointer;
-      font-family: var(--font);
       font-size: 11px;
       padding: 4px 10px;
-      transition: all .15s;
     }
     .btn-logout:hover { border-color: var(--red); color: var(--red); }
 
-    /* ── Content ── */
-    .content { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 24px; }
+    /* ── Workspace (two-column when detail open) ── */
+    .workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
 
-    /* ── Section headings ── */
+    /* ── Left column: monitors ── */
+    .monitors-col {
+      flex: 1;
+      min-width: 300px;
+      overflow-y: auto;
+      padding: 20px;
+      transition: max-width .2s ease;
+    }
+    .workspace.detail-open .monitors-col {
+      max-width: 400px;
+      border-right: 1px solid var(--border);
+    }
+
+    /* ── Section heading ── */
     .section-title {
       font-size: 11px;
       font-weight: 600;
@@ -82,7 +92,7 @@
       align-items: center;
       gap: 8px;
     }
-    .section-title .badge {
+    .badge {
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -96,7 +106,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px 18px;
+      padding: 14px 16px;
       display: flex;
       gap: 10px;
       align-items: flex-end;
@@ -110,270 +120,171 @@
       border: 1px solid var(--border);
       border-radius: 5px;
       color: var(--text);
-      font-family: var(--font);
       font-size: 12px;
-      padding: 7px 10px;
+      padding: 6px 10px;
       outline: none;
-      transition: border-color .15s;
-      min-width: 140px;
+      min-width: 130px;
     }
     .form-field input:focus, .form-field select:focus { border-color: var(--accent); }
-    .form-field input[name="url"] { min-width: 240px; }
+    .form-field input[name="url"] { min-width: 220px; }
     .btn-add {
       background: var(--accent);
       border: none;
       border-radius: 5px;
       color: #0d1117;
       cursor: pointer;
-      font-family: var(--font);
       font-size: 12px;
       font-weight: 700;
-      padding: 7px 16px;
-      transition: opacity .15s;
+      padding: 6px 16px;
       white-space: nowrap;
     }
     .btn-add:hover { opacity: .88; }
     .btn-add:disabled { opacity: .4; cursor: not-allowed; }
 
-    /* ── Monitor grid ── */
+    /* ── Monitor cards ── */
     .monitor-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     .monitor-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 14px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      padding: 12px 14px;
+      cursor: pointer;
       position: relative;
-      animation: fadeIn .2s ease;
+      transition: border-color .15s, background .15s;
+      border-left: 3px solid transparent;
     }
-    @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
-    .monitor-card.up   { border-left: 3px solid var(--green); }
-    .monitor-card.down { border-left: 3px solid var(--red); }
-    .monitor-card.unknown { border-left: 3px solid var(--border); }
+    .monitor-card:hover { border-color: var(--accent); }
+    .monitor-card.selected { border-color: var(--accent); background: #1c2230; }
+    .monitor-card.up   { border-left-color: var(--green); }
+    .monitor-card.down { border-left-color: var(--red); }
+    .monitor-card.unknown { border-left-color: var(--border); }
+    .monitor-card.selected.up   { border-color: var(--accent); border-left-color: var(--green); }
+    .monitor-card.selected.down { border-color: var(--accent); border-left-color: var(--red); }
+
     .monitor-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .monitor-name { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .monitor-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
     .status-badge {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .5px;
-      padding: 2px 8px;
-      border-radius: 3px;
-      flex-shrink: 0;
+      font-size: 10px; font-weight: 700; letter-spacing: .5px;
+      padding: 2px 7px; border-radius: 3px; flex-shrink: 0;
     }
-    .status-badge.up   { background: rgba(63,185,80,.18); color: var(--green); }
-    .status-badge.down { background: rgba(248,81,73,.18); color: var(--red); }
+    .status-badge.up      { background: rgba(63,185,80,.15);  color: var(--green); }
+    .status-badge.down    { background: rgba(248,81,73,.15);  color: var(--red); }
     .status-badge.unknown { background: var(--surface2); color: var(--muted); }
-    .monitor-url { font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .monitor-meta { display: flex; gap: 16px; font-size: 10px; color: var(--muted); margin-top: 2px; }
-    .monitor-meta span { display: flex; align-items: center; gap: 3px; }
-    .monitor-actions { position: absolute; top: 10px; right: 12px; }
+
+    .monitor-url   { font-size: 11px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+    .monitor-meta  { display: flex; gap: 14px; font-size: 10px; color: var(--muted); margin-top: 5px; }
+    .monitor-error { font-size: 10px; color: var(--red); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     .btn-delete {
-      background: transparent;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 14px;
-      line-height: 1;
-      padding: 2px 4px;
-      border-radius: 3px;
-      transition: color .15s;
+      position: absolute; top: 8px; right: 10px;
+      background: none; border: none; color: transparent;
+      cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 3px;
     }
-    .btn-delete:hover { color: var(--red); }
-    .monitor-error { font-size: 10px; color: var(--red); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .monitor-card:hover .btn-delete { color: var(--muted); }
+    .btn-delete:hover { color: var(--red) !important; }
+
     .monitors-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 32px 0; }
-    .outage-toggle {
-      margin-top: 8px;
-      font-size: 10px;
-      color: var(--muted);
-      cursor: pointer;
-      user-select: none;
-      padding-top: 8px;
-      border-top: 1px solid var(--border);
-      transition: color .15s;
+
+    /* ── Right column: detail panel ── */
+    .detail-panel {
+      display: none;
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+      min-width: 0;
     }
-    .outage-toggle:hover { color: var(--accent); }
-    .outage-detail { margin-top: 8px; display: none; }
-    .outage-item {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 8px 10px;
-      margin-bottom: 6px;
-      font-size: 11px;
-    }
-    .outage-item.ongoing { border-left: 2px solid var(--red); }
-    .outage-item.resolved { border-left: 2px solid var(--muted); }
-    .outage-ts { color: var(--muted); font-size: 10px; display: flex; justify-content: space-between; }
-    .outage-cause { color: var(--text); margin-top: 5px; line-height: 1.4; }
-    .outage-remediation { color: var(--muted); margin-top: 4px; font-size: 10px; line-height: 1.5; }
-    .outage-pending { color: var(--muted); font-style: italic; }
+    .workspace.detail-open .detail-panel { display: block; }
 
-    /* ── Divider ── */
-    .section-divider { height: 1px; background: var(--border); }
-
-    /* ── AIOps section ── */
-    .aiops-section { display: flex; flex-direction: column; gap: 14px; }
-
-    /* ── Metric cards ── */
-    .metrics-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
       gap: 12px;
+      margin-bottom: 20px;
     }
-    .metric-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 18px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      transition: background .2s;
-    }
-    .metric-card.warning  { border-top: 2px solid var(--yellow); }
-    .metric-card.critical { border-top: 2px solid var(--red); box-shadow: inset 0 0 30px rgba(248,81,73,.04); }
-    .metric-card.normal   { border-top: 2px solid transparent; }
-    .metric-label { font-size: 10px; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; }
-    .metric-value { font-size: 32px; font-weight: 700; line-height: 1; transition: color .3s; }
-    .metric-value.normal   { color: var(--green); }
-    .metric-value.warning  { color: var(--yellow); }
-    .metric-value.critical { color: var(--red); }
-    .metric-unit { font-size: 13px; color: var(--muted); margin-left: 2px; }
-    .metric-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
-    .sparkline-wrap { margin-top: 8px; }
-    svg.sparkline { width: 100%; height: 36px; display: block; }
-
-    /* ── 3-col panels ── */
-    .panels-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
-      min-height: 360px;
-    }
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .panel-header {
-      border-bottom: 1px solid var(--border);
-      padding: 8px 14px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--muted);
-      letter-spacing: .8px;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .detail-name { font-size: 17px; font-weight: 700; }
+    .detail-url  { font-size: 11px; color: var(--accent); margin-top: 3px; }
+    .btn-close {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--muted); cursor: pointer; font-size: 13px; padding: 3px 8px;
       flex-shrink: 0;
     }
-    .panel-header .badge {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1px 7px;
-      font-size: 10px;
-      color: var(--text);
-    }
-    .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
-    .panel-body::-webkit-scrollbar { width: 4px; }
-    .panel-body::-webkit-scrollbar-track { background: transparent; }
-    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .btn-close:hover { border-color: var(--muted); color: var(--text); }
 
-    /* ── Alert feed ── */
-    .alert-item {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      animation: slideIn .25s ease;
-    }
-    .alert-item.critical { border-left: 3px solid var(--red); }
-    .alert-item.warning  { border-left: 3px solid var(--yellow); }
-    @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
-    .alert-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .alert-metric { font-size: 11px; font-weight: 700; }
-    .alert-metric.critical { color: var(--red); }
-    .alert-metric.warning  { color: var(--yellow); }
-    .alert-sev { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 600; letter-spacing: .5px; }
-    .alert-sev.critical { background: rgba(248,81,73,.2); color: var(--red); }
-    .alert-sev.warning  { background: rgba(210,153,34,.2); color: var(--yellow); }
-    .alert-msg { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
-    .alert-ts  { font-size: 9px; color: var(--muted); margin-top: 4px; }
-    .alert-id  { font-size: 9px; color: var(--accent); }
-
-    /* ── Trigger buttons ── */
-    .trigger-grid {
+    /* ── Stats row ── */
+    .stats-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 12px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
     }
-    .btn {
+    .stat-card {
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 8px 10px;
-      font-family: var(--font);
-      font-size: 11px;
-      cursor: pointer;
-      background: var(--surface2);
-      color: var(--text);
-      transition: all .15s;
-      text-align: center;
+      border-radius: 8px;
+      padding: 14px 16px;
     }
-    .btn:hover { filter: brightness(1.3); }
-    .btn.active { border-color: var(--red); background: rgba(248,81,73,.15); color: var(--red); }
-    .btn-reset {
-      grid-column: 1 / -1;
-      background: var(--bg);
-      border-color: var(--green);
-      color: var(--green);
-    }
-    .btn-reset:hover { background: rgba(63,185,80,.12); }
+    .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+    .stat-value { font-size: 24px; font-weight: 700; }
+    .stat-value.good { color: var(--green); }
+    .stat-value.warn { color: var(--yellow); }
+    .stat-value.bad  { color: var(--red); }
 
-    /* ── AI panel ── */
-    .ai-item {
-      background: var(--bg);
+    /* ── Response time chart ── */
+    .chart-section {
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 10px;
-      animation: slideIn .3s ease;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
     }
-    .ai-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .ai-icon { font-size: 16px; }
-    .ai-alert-id { font-size: 10px; color: var(--accent); font-weight: 700; }
-    .ai-conf { font-size: 9px; padding: 2px 6px; border-radius: 3px; margin-left: auto; }
-    .ai-conf.high   { background: rgba(63,185,80,.2);  color: var(--green); }
-    .ai-conf.medium { background: rgba(210,153,34,.2); color: var(--yellow); }
-    .ai-conf.low    { background: rgba(248,81,73,.2);  color: var(--red); }
-    .ai-section-title { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 4px; margin-top: 8px; }
-    .ai-text { font-size: 11px; color: var(--text); line-height: 1.55; }
-    .ai-ts { font-size: 9px; color: var(--muted); margin-top: 8px; }
-    .ai-loading { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; }
-    .spinner { width: 10px; height: 10px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .ai-error { font-size: 11px; color: var(--red); }
-    .empty-state { color: var(--muted); font-size: 11px; text-align: center; padding: 24px 0; }
-    .panel-divider { height: 1px; background: var(--border); margin: 10px 0; }
+    .chart-title {
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .chart-title span { font-size: 11px; color: var(--text); text-transform: none; letter-spacing: 0; }
+    svg.rt-chart { width: 100%; height: 140px; display: block; overflow: visible; }
 
-    @media (max-width: 900px) {
-      .metrics-row { grid-template-columns: repeat(2, 1fr); }
-      .panels-row { grid-template-columns: 1fr; }
+    /* ── Outages section ── */
+    .outages-section { }
+    .outages-title {
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px;
     }
-    @media (max-width: 600px) {
-      .metrics-row { grid-template-columns: 1fr; }
+    .outage-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+    .outage-item.ongoing  { border-left-color: var(--red); }
+    .outage-item.resolved { border-left-color: var(--muted); }
+    .outage-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .outage-ts  { font-size: 11px; color: var(--muted); }
+    .outage-dur { font-size: 11px; font-weight: 600; }
+    .outage-dur.ongoing { color: var(--red); }
+    .outage-dur.resolved { color: var(--muted); }
+    .outage-cause { font-size: 12px; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
+    .outage-remediation {
+      font-size: 11px; color: var(--muted); line-height: 1.6;
+      background: var(--bg); border-radius: 5px; padding: 8px 10px; margin-top: 6px;
+    }
+    .outage-pending { font-size: 11px; color: var(--muted); font-style: italic; }
+    .no-outages { font-size: 12px; color: var(--muted); text-align: center; padding: 20px 0; }
+
+    .loading-msg { color: var(--muted); font-size: 12px; padding: 20px 0; text-align: center; }
+
+    @media (max-width: 700px) {
+      .workspace.detail-open .monitors-col { display: none; }
+      .workspace.detail-open .detail-panel { display: block; }
+      .stats-row { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -381,12 +292,9 @@
 
 <header>
   <div class="logo">Resilo<span>AI</span></div>
-  <div class="ws-status">
-    <div class="ws-dot" id="wsDot"></div>
-    <span id="wsLabel">Connecting…</span>
-  </div>
   <div class="spacer"></div>
   <div class="ts" id="clockEl"></div>
+
   <div id="slugArea" style="display:flex;align-items:center;gap:6px;">
     <a id="statusPageLink" href="#" target="_blank"
        style="font-size:11px;color:#58a6ff;border:1px solid #30363d;border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
@@ -400,27 +308,24 @@
       <input id="slugInput" type="text" maxlength="30" placeholder="your-slug"
              style="font-size:11px;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#e6edf3;width:140px;" />
       <button onclick="saveSlug()"
-              style="font-size:11px;background:#238636;border:none;border-radius:5px;padding:4px 10px;color:#fff;cursor:pointer;">
-        Save
-      </button>
+              style="font-size:11px;background:#238636;border:none;border-radius:5px;padding:4px 10px;color:#fff;cursor:pointer;">Save</button>
       <button onclick="hideSlugEdit()"
-              style="font-size:11px;background:none;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#8b949e;cursor:pointer;">
-        ✕
-      </button>
+              style="font-size:11px;background:none;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#8b949e;cursor:pointer;">✕</button>
       <span id="slugEditMsg" style="font-size:11px;color:#f85149;"></span>
     </div>
   </div>
+
   <form action="/auth/logout" method="post" style="margin:0;">
     <button class="btn-logout" type="submit">Sign out</button>
   </form>
 </header>
 
-<div class="content">
+<div class="workspace" id="workspace">
 
-  <!-- ══ MONITORS SECTION ══ -->
-  <div>
+  <!-- ── Left: monitor list ── -->
+  <div class="monitors-col" id="monitorsCol">
     <div class="section-title">
-      🌐 URL Monitors
+      URL Monitors
       <span class="badge" id="monitorCount">0</span>
       <span style="margin-left:auto;font-size:10px;color:var(--muted);" id="monitorRefreshLabel"></span>
     </div>
@@ -443,7 +348,7 @@
           <option value="1800">Every 30 min</option>
         </select>
       </div>
-      <button type="submit" class="btn-add" id="btnAddMonitor">+ Add Monitor</button>
+      <button type="submit" class="btn-add" id="btnAddMonitor">+ Add</button>
     </form>
 
     <div class="monitor-grid" id="monitorGrid">
@@ -451,80 +356,49 @@
     </div>
   </div>
 
-  <div class="section-divider"></div>
-
-  <!-- ══ AIOPS SECTION ══ -->
-  <div class="aiops-section">
-    <div class="section-title">📊 AIOps — Live System Metrics</div>
-
-    <!-- Metric cards -->
-    <div class="metrics-row" id="metricsRow"></div>
-
-    <!-- 3-column panels -->
-    <div class="panels-row">
-      <!-- Alert feed -->
-      <div class="panel">
-        <div class="panel-header">
-          ⚡ Alert Feed
-          <span class="badge" id="alertCount">0</span>
-        </div>
-        <div class="panel-body" id="alertFeed">
-          <div class="empty-state" id="alertEmpty">No alerts yet</div>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="panel">
-        <div class="panel-header">🎛 Simulator Controls</div>
-        <div class="panel-body">
-          <div style="color:var(--muted);font-size:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.7px;">Trigger Scenarios</div>
-          <div class="trigger-grid">
-            <button class="btn" id="btnCPU"     onclick="trigger('cpu')">🔥 CPU Spike</button>
-            <button class="btn" id="btnMemory"  onclick="trigger('memory')">💾 Memory Pressure</button>
-            <button class="btn" id="btnLatency" onclick="trigger('latency')">⏱ High Latency</button>
-            <button class="btn" id="btnError"   onclick="trigger('error')">🚨 Error Storm</button>
-            <button class="btn btn-reset"        onclick="resetAll()">✅ Reset All</button>
-          </div>
-          <div class="panel-divider"></div>
-          <div style="color:var(--muted);font-size:10px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.7px;">Threshold Reference</div>
-          <table style="width:100%;border-collapse:collapse;font-size:11px;">
-            <thead>
-              <tr style="color:var(--muted);">
-                <th style="text-align:left;padding:3px 0;">Metric</th>
-                <th style="text-align:right;padding:3px 0;">Warn</th>
-                <th style="text-align:right;padding:3px 0;">Crit</th>
-              </tr>
-            </thead>
-            <tbody style="color:var(--text);">
-              <tr><td>CPU</td><td style="text-align:right;color:var(--yellow);">70%</td><td style="text-align:right;color:var(--red);">85%</td></tr>
-              <tr><td>Memory</td><td style="text-align:right;color:var(--yellow);">65%</td><td style="text-align:right;color:var(--red);">80%</td></tr>
-              <tr><td>Latency</td><td style="text-align:right;color:var(--yellow);">800ms</td><td style="text-align:right;color:var(--red);">1500ms</td></tr>
-              <tr><td>Error Rate</td><td style="text-align:right;color:var(--yellow);">5%</td><td style="text-align:right;color:var(--red);">10%</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- AI Analysis -->
-      <div class="panel">
-        <div class="panel-header">
-          🤖 AI Analysis
-          <span class="badge" id="aiCount">0</span>
-        </div>
-        <div class="panel-body" id="aiPanel">
-          <div class="empty-state" id="aiEmpty">AI responses will appear when alerts fire</div>
-        </div>
-      </div>
-    </div>
+  <!-- ── Right: detail panel ── -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="loading-msg" id="detailLoading">Select a monitor to see details</div>
   </div>
 
-</div><!-- /content -->
+</div><!-- /workspace -->
 
 <script>
-// ── Auth token and user slug (injected server-side via meta tags) ──
+// ── Injected by server ──────────────────────────────────────────
 const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
 const USER_SLUG  = document.querySelector('meta[name="USER_SLUG"]')?.content  || '';
 
+// ── Helpers ─────────────────────────────────────────────────────
+function authHeaders(extra) {
+  return Object.assign({ 'Content-Type': 'application/json',
+    ...(AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}) }, extra);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&#34;');
+}
+
+function relTime(iso) {
+  if (!iso) return '—';
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  return `${Math.floor(s/3600)}h ago`;
+}
+
+function fmtDur(from, to) {
+  const s = Math.floor((new Date(to) - new Date(from)) / 1000);
+  if (s < 60)   return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+// ── Clock ───────────────────────────────────────────────────────
+const clockEl = document.getElementById('clockEl');
+const tickClock = () => { clockEl.textContent = new Date().toLocaleTimeString(); };
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Slug editor ─────────────────────────────────────────────────
 let currentSlug = USER_SLUG;
 
 function applySlug(slug) {
@@ -558,32 +432,17 @@ async function saveSlug() {
   const val = document.getElementById('slugInput').value.trim().toLowerCase();
   const msg = document.getElementById('slugEditMsg');
   msg.style.color = '#f85149';
-  if (val.length < 3 || val.length > 30) {
-    msg.textContent = 'Must be 3–30 characters.';
-    return;
-  }
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(val)) {
-    msg.textContent = 'Letters, numbers, hyphens only; no leading/trailing hyphens.';
-    return;
-  }
+  if (val.length < 3 || val.length > 30) { msg.textContent = 'Must be 3–30 characters.'; return; }
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(val)) { msg.textContent = 'Letters, numbers, hyphens only.'; return; }
   try {
-    const res = await fetch('/api/profile/slug', {
-      method: 'PUT',
-      headers: authHeaders(),
-      body: JSON.stringify({ slug: val }),
-    });
+    const res  = await fetch('/api/profile/slug', { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ slug: val }) });
     const data = await res.json();
-    if (!res.ok) {
-      msg.textContent = data.error || 'Failed to save.';
-      return;
-    }
+    if (!res.ok) { msg.textContent = data.error || 'Failed to save.'; return; }
     applySlug(data.slug);
     msg.style.color = '#3fb950';
     msg.textContent = '✓ Saved';
     setTimeout(hideSlugEdit, 800);
-  } catch {
-    msg.textContent = 'Network error.';
-  }
+  } catch { msg.textContent = 'Network error.'; }
 }
 
 document.getElementById('slugInput')?.addEventListener('keydown', e => {
@@ -593,89 +452,63 @@ document.getElementById('slugInput')?.addEventListener('keydown', e => {
 
 applySlug(USER_SLUG);
 
-function authHeaders(extra) {
-  const h = Object.assign({ 'Content-Type': 'application/json' }, extra);
-  if (AUTH_TOKEN) h['Authorization'] = `Bearer ${AUTH_TOKEN}`;
-  return h;
-}
+// ── Monitor list ─────────────────────────────────────────────────
+let monitorsData  = [];
+let selectedId    = null;
 
-// ══════════════════════════════════════════════════════════════════
-// MONITORS
-// ══════════════════════════════════════════════════════════════════
-
-const monitorGrid     = document.getElementById('monitorGrid');
-const monitorCountEl  = document.getElementById('monitorCount');
-const monitorRefresh  = document.getElementById('monitorRefreshLabel');
-let monitorsData = [];
+const monitorGrid    = document.getElementById('monitorGrid');
+const monitorCountEl = document.getElementById('monitorCount');
 
 function isUp(m) {
-  if (m.last_status === null || m.last_status === undefined) return null;
+  if (m.last_status == null) return null;
   return m.last_status >= 200 && m.last_status < 300;
-}
-
-function relTime(isoStr) {
-  if (!isoStr) return '—';
-  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (diff < 60)  return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
-  return `${Math.floor(diff/3600)}h ago`;
 }
 
 function renderMonitors(monitors) {
   monitorsData = monitors;
   monitorCountEl.textContent = monitors.length;
 
-  // Keep form, clear cards
-  const existing = monitorGrid.querySelectorAll('.monitor-card');
-  existing.forEach(el => el.remove());
-  const emptyEl = document.getElementById('monitorEmpty');
-  if (emptyEl) emptyEl.remove();
+  monitorGrid.querySelectorAll('.monitor-card').forEach(el => el.remove());
+  document.getElementById('monitorEmpty')?.remove();
 
   if (monitors.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'monitors-empty';
-    empty.id = 'monitorEmpty';
-    empty.textContent = 'No monitors yet — add one above';
-    monitorGrid.appendChild(empty);
+    const el = document.createElement('div');
+    el.className = 'monitors-empty'; el.id = 'monitorEmpty';
+    el.textContent = 'No monitors yet — add one above';
+    monitorGrid.appendChild(el);
     return;
   }
 
   monitors.forEach(m => {
-    const up = isUp(m);
-    const statusClass = up === null ? 'unknown' : up ? 'up' : 'down';
-    const statusText  = up === null ? 'PENDING' : up ? 'UP' : 'DOWN';
+    const up  = isUp(m);
+    const cls = up === null ? 'unknown' : up ? 'up' : 'down';
+    const lbl = up === null ? 'PENDING'  : up ? 'UP'  : 'DOWN';
 
     const card = document.createElement('div');
-    card.className = `monitor-card ${statusClass}`;
+    card.className = `monitor-card ${cls}${m.id === selectedId ? ' selected' : ''}`;
     card.dataset.id = m.id;
+    card.onclick = () => selectMonitor(m.id);
 
-    const latency = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : '—';
-    const checked = relTime(m.last_checked_at);
-    const intervalLabel = m.interval_seconds < 120
+    const latency  = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : '—';
+    const interval = m.interval_seconds < 120
       ? `${m.interval_seconds}s`
-      : m.interval_seconds < 3600
-        ? `${Math.floor(m.interval_seconds/60)}m`
-        : `${Math.floor(m.interval_seconds/3600)}h`;
-
+      : m.interval_seconds < 3600 ? `${Math.floor(m.interval_seconds/60)}m` : `${Math.floor(m.interval_seconds/3600)}h`;
     const errHtml = (m.last_error && !up)
-      ? `<div class="monitor-error" title="${escHtml(m.last_error)}">${escHtml(m.last_error.slice(0, 80))}</div>`
-      : '';
+      ? `<div class="monitor-error" title="${escHtml(m.last_error)}">${escHtml(m.last_error.slice(0,80))}</div>` : '';
 
     card.innerHTML = `
       <div class="monitor-top">
         <span class="monitor-name" title="${escHtml(m.name)}">${escHtml(m.name)}</span>
-        <span class="status-badge ${statusClass}">${statusText}</span>
+        <span class="status-badge ${cls}">${lbl}</span>
       </div>
-      <div class="monitor-url" title="${escHtml(m.url)}">${escHtml(m.url)}</div>
+      <div class="monitor-url">${escHtml(m.url)}</div>
       ${errHtml}
       <div class="monitor-meta">
         <span>⏱ ${latency}</span>
-        <span>🕐 ${checked}</span>
-        <span>↻ ${intervalLabel}</span>
+        <span>🕐 ${relTime(m.last_checked_at)}</span>
+        <span>↻ ${interval}</span>
       </div>
-      <div class="outage-toggle" id="toggle-${m.id}" onclick="toggleOutages('${m.id}')">▶ Outage history</div>
-      <div class="outage-detail" id="outage-detail-${m.id}"></div>
-      <button class="btn-delete" title="Delete monitor" onclick="deleteMonitor('${m.id}')">✕</button>
+      <button class="btn-delete" title="Delete" onclick="event.stopPropagation();deleteMonitor('${m.id}')">✕</button>
     `;
     monitorGrid.appendChild(card);
   });
@@ -686,389 +519,237 @@ async function fetchMonitors() {
     const res = await fetch('/api/monitors', { credentials: 'include' });
     if (res.status === 401) { location.href = '/login'; return; }
     if (!res.ok) return;
-    const monitors = await res.json();
-    renderMonitors(monitors || []);
-    monitorRefresh.textContent = `Refreshed ${new Date().toLocaleTimeString()}`;
-  } catch (e) {
-    console.error('fetchMonitors:', e);
-  }
+    const list = await res.json();
+    renderMonitors(list || []);
+    document.getElementById('monitorRefreshLabel').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    // Refresh detail panel data silently if one is open
+    if (selectedId) refreshDetailStats();
+  } catch (e) { console.error('fetchMonitors:', e); }
 }
 
 async function deleteMonitor(id) {
   if (!confirm('Delete this monitor?')) return;
+  const res = await fetch(`/api/monitors/${id}`, { method: 'DELETE', credentials: 'include' });
+  if (res.ok) {
+    if (selectedId === id) closeDetail();
+    fetchMonitors();
+  }
+}
+
+document.getElementById('addMonitorForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  const btn  = document.getElementById('btnAddMonitor');
+  btn.disabled = true; btn.textContent = 'Adding…';
   try {
-    const res = await fetch(`/api/monitors/${id}`, {
-      method: 'DELETE',
-      credentials: 'include',
+    const res = await fetch('/api/monitors', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: form.name.value.trim(),
+        url:  form.url.value.trim(),
+        interval_seconds: parseInt(form.interval.value, 10),
+      }),
     });
-    if (res.ok) fetchMonitors();
-  } catch (e) {
-    console.error('deleteMonitor:', e);
-  }
+    if (res.status === 401) { location.href = '/login'; return; }
+    if (res.ok) { form.reset(); await fetchMonitors(); }
+    else { alert('Error: ' + await res.text()); }
+  } catch (e) { console.error(e); }
+  finally { btn.disabled = false; btn.textContent = '+ Add'; }
+});
+
+// ── Detail panel ─────────────────────────────────────────────────
+const workspace   = document.getElementById('workspace');
+const detailPanel = document.getElementById('detailPanel');
+
+function closeDetail() {
+  selectedId = null;
+  workspace.classList.remove('detail-open');
+  detailPanel.innerHTML = '<div class="loading-msg">Select a monitor to see details</div>';
+  monitorGrid.querySelectorAll('.monitor-card').forEach(c => c.classList.remove('selected'));
 }
 
-const outageCache = {}; // monitorID -> { loaded: bool }
+async function selectMonitor(id) {
+  if (selectedId === id) { closeDetail(); return; }
+  selectedId = id;
 
-async function toggleOutages(id) {
-  const detail  = document.getElementById(`outage-detail-${id}`);
-  const toggle  = document.getElementById(`toggle-${id}`);
-  if (!detail || !toggle) return;
+  // Mark selected card
+  monitorGrid.querySelectorAll('.monitor-card').forEach(c =>
+    c.classList.toggle('selected', c.dataset.id === id));
 
-  const open = detail.style.display === 'block';
-  if (open) {
-    detail.style.display = 'none';
-    toggle.textContent = '▶ Outage history';
-    return;
-  }
+  workspace.classList.add('detail-open');
+  detailPanel.innerHTML = '<div class="loading-msg">Loading…</div>';
 
-  detail.style.display = 'block';
-  toggle.textContent = '▼ Outage history';
+  const m = monitorsData.find(x => x.id === id);
+  if (!m) return;
 
-  if (outageCache[id]) return; // already fetched
-  outageCache[id] = true;
-  detail.innerHTML = `<div class="outage-pending">Loading…</div>`;
+  // Parallel fetch: results + outages
+  const [resultsRes, outagesRes] = await Promise.all([
+    fetch(`/api/monitors/${id}/results?limit=50`, { credentials: 'include' }),
+    fetch(`/api/monitors/${id}/outages`,          { credentials: 'include' }),
+  ]);
 
-  try {
-    const res = await fetch(`/api/monitors/${id}/outages`, { credentials: 'include' });
-    if (!res.ok) { detail.innerHTML = `<div class="outage-pending">Failed to load.</div>`; return; }
-    const outages = await res.json();
-    renderOutages(id, outages || []);
-  } catch (e) {
-    detail.innerHTML = `<div class="outage-pending">Error loading outages.</div>`;
-  }
+  const results = resultsRes.ok  ? (await resultsRes.json()) : [];
+  const outages = outagesRes.ok  ? (await outagesRes.json()) : [];
+
+  renderDetail(m, results || [], outages || []);
 }
 
-function renderOutages(monitorId, outages) {
-  const detail = document.getElementById(`outage-detail-${monitorId}`);
-  if (!detail) return;
+async function refreshDetailStats() {
+  if (!selectedId) return;
+  const m = monitorsData.find(x => x.id === selectedId);
+  if (!m) return;
+  const [resultsRes, outagesRes] = await Promise.all([
+    fetch(`/api/monitors/${selectedId}/results?limit=50`, { credentials: 'include' }),
+    fetch(`/api/monitors/${selectedId}/outages`,          { credentials: 'include' }),
+  ]);
+  const results = resultsRes.ok ? (await resultsRes.json()) : [];
+  const outages = outagesRes.ok ? (await outagesRes.json()) : [];
+  renderDetail(m, results || [], outages || []);
+}
 
-  if (outages.length === 0) {
-    detail.innerHTML = `<div class="outage-pending">No outages recorded — great!</div>`;
-    return;
-  }
+function renderDetail(m, results, outages) {
+  const up  = isUp(m);
+  const cls = up === null ? 'unknown' : up ? 'up' : 'down';
+  const lbl = up === null ? 'PENDING'  : up ? 'UP'  : 'DOWN';
 
-  const shown = outages.slice(0, 3);
-  detail.innerHTML = shown.map(o => {
-    const isOngoing  = !o.resolved_at;
-    const cls        = isOngoing ? 'ongoing' : 'resolved';
-    const started    = new Date(o.started_at).toLocaleString();
-    const durLabel   = isOngoing
-      ? '<span style="color:var(--red);">Ongoing</span>'
-      : `${fmtDuration(new Date(o.started_at), new Date(o.resolved_at))}`;
+  // Stats: uptime from results, outages this month
+  const now  = Date.now();
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const weekResults = results.filter(r => now - new Date(r.checked_at) < week);
+  const upCount  = weekResults.filter(r => r.status_code >= 200 && r.status_code < 300).length;
+  const uptimePct = weekResults.length > 0 ? (upCount / weekResults.length * 100).toFixed(1) : '—';
 
-    const causeHtml  = o.root_cause
-      ? `<div class="outage-cause">${escHtml(o.root_cause)}</div>`
-      : `<div class="outage-pending">Analysis pending…</div>`;
+  const monthStart  = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+  const monthOutages = outages.filter(o => new Date(o.started_at) >= monthStart).length;
 
-    const remHtml = o.remediation
-      ? `<div class="outage-remediation">${escHtml(o.remediation).replace(/\n/g,'<br>')}</div>`
-      : '';
+  const avgLatency = results.length > 0
+    ? Math.round(results.filter(r => r.latency_ms != null).reduce((s, r) => s + r.latency_ms, 0)
+        / results.filter(r => r.latency_ms != null).length)
+    : null;
 
-    return `
-      <div class="outage-item ${cls}">
-        <div class="outage-ts">
-          <span>${started}</span>
-          <span>${durLabel}</span>
+  const uptimeClass = uptimePct === '—' ? '' : +uptimePct >= 99 ? 'good' : +uptimePct >= 95 ? 'warn' : 'bad';
+
+  detailPanel.innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-name">
+          <span class="status-badge ${cls}" style="font-size:11px;margin-right:8px;">${lbl}</span>${escHtml(m.name)}
         </div>
-        ${causeHtml}
-        ${remHtml}
+        <div class="detail-url">${escHtml(m.url)}</div>
+      </div>
+      <button class="btn-close" onclick="closeDetail()">✕</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">7-day uptime</div>
+        <div class="stat-value ${uptimeClass}">${uptimePct === '—' ? '—' : uptimePct + '%'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Outages this month</div>
+        <div class="stat-value ${monthOutages === 0 ? 'good' : monthOutages <= 2 ? 'warn' : 'bad'}">${monthOutages}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg response</div>
+        <div class="stat-value">${avgLatency != null ? avgLatency + 'ms' : '—'}</div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-title">
+        Response time — last ${results.length} checks
+        <span>${relTime(m.last_checked_at)}</span>
+      </div>
+      ${buildChart(results)}
+    </div>
+
+    <div class="outages-section">
+      <div class="outages-title">Recent outages</div>
+      ${buildOutages(outages.slice(0, 5))}
+    </div>
+  `;
+}
+
+// ── SVG line chart ───────────────────────────────────────────────
+function buildChart(results) {
+  if (!results.length) return '<div class="loading-msg">No data yet</div>';
+
+  // Results come newest-first from API; reverse for left→right time order
+  const pts = [...results].reverse();
+
+  const W = 600, H = 120, PX = 10, PY = 10;
+  const latencies = pts.map(r => r.latency_ms ?? 0);
+  const maxL = Math.max(...latencies, 1);
+
+  const x = (i) => PX + (i / Math.max(pts.length - 1, 1)) * (W - PX * 2);
+  const y = (v)  => PY + (1 - v / maxL) * (H - PY * 2);
+
+  // Line path
+  const pathD = pts.map((r, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(r.latency_ms ?? 0).toFixed(1)}`).join(' ');
+
+  // Area fill (close below)
+  const areaD = pathD + ` L${x(pts.length-1).toFixed(1)},${H} L${PX},${H} Z`;
+
+  // Dots — colored by status
+  const dots = pts.map((r, i) => {
+    const ok  = r.status_code >= 200 && r.status_code < 300;
+    const col = !r.status_code || r.error ? '#f85149' : ok ? '#3fb950' : '#f85149';
+    return `<circle cx="${x(i).toFixed(1)}" cy="${y(r.latency_ms ?? 0).toFixed(1)}" r="3" fill="${col}" opacity=".85"/>`;
+  }).join('');
+
+  // Y-axis label
+  const yLabel = `${maxL}ms`;
+
+  return `
+    <svg class="rt-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#58a6ff" stop-opacity=".25"/>
+          <stop offset="100%" stop-color="#58a6ff" stop-opacity=".02"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaD}" fill="url(#cg)"/>
+      <path d="${pathD}" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text x="${PX}" y="${PY - 2}" fill="#8b949e" font-size="9">${escHtml(yLabel)}</text>
+      <text x="${PX}" y="${H - 2}"  fill="#8b949e" font-size="9">0ms</text>
+    </svg>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;">
+      <span>${pts.length > 0 ? new Date(pts[0].checked_at).toLocaleString() : ''}</span>
+      <span style="display:flex;gap:10px;">
+        <span style="color:var(--green);">● OK</span>
+        <span style="color:var(--red);">● Error</span>
+      </span>
+      <span>${pts.length > 0 ? new Date(pts[pts.length-1].checked_at).toLocaleString() : ''}</span>
+    </div>`;
+}
+
+// ── Outage list ──────────────────────────────────────────────────
+function buildOutages(outages) {
+  if (!outages.length) return '<div class="no-outages">No outages recorded — great!</div>';
+
+  return outages.map(o => {
+    const ongoing = !o.resolved_at;
+    const dur     = ongoing ? 'Ongoing' : fmtDur(o.started_at, o.resolved_at);
+    const remHtml = o.remediation
+      ? `<div class="outage-remediation">${escHtml(o.remediation).replace(/\n/g,'<br>')}</div>` : '';
+    return `
+      <div class="outage-item ${ongoing ? 'ongoing' : 'resolved'}">
+        <div class="outage-row">
+          <span class="outage-ts">${new Date(o.started_at).toLocaleString()}</span>
+          <span class="outage-dur ${ongoing ? 'ongoing' : 'resolved'}">${dur}</span>
+        </div>
+        ${o.root_cause
+          ? `<div class="outage-cause">${escHtml(o.root_cause)}</div>${remHtml}`
+          : '<div class="outage-pending">AI analysis pending…</div>'}
       </div>`;
   }).join('');
 }
 
-function fmtDuration(from, to) {
-  const secs = Math.floor((to - from) / 1000);
-  if (secs < 60)   return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
-  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
-}
-
-document.getElementById('addMonitorForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const btn = document.getElementById('btnAddMonitor');
-  btn.disabled = true;
-  btn.textContent = 'Adding…';
-
-  const body = {
-    name:             form.name.value.trim(),
-    url:              form.url.value.trim(),
-    interval_seconds: parseInt(form.interval.value, 10),
-  };
-
-  try {
-    const res = await fetch('/api/monitors', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 401) { location.href = '/login'; return; }
-    if (res.ok) {
-      form.reset();
-      await fetchMonitors();
-    } else {
-      const text = await res.text();
-      alert('Error: ' + text);
-    }
-  } catch (err) {
-    console.error('addMonitor:', err);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '+ Add Monitor';
-  }
-});
-
-// Auto-refresh monitors every 30s
+// ── Boot ─────────────────────────────────────────────────────────
 fetchMonitors();
 setInterval(fetchMonitors, 30_000);
-
-// ══════════════════════════════════════════════════════════════════
-// AIOPS — METRICS
-// ══════════════════════════════════════════════════════════════════
-
-const METRICS = [
-  { key: 'cpu',        label: 'CPU Usage',  unit: '%',  warnT: 70,  critT: 85,   color: '#58a6ff' },
-  { key: 'memory',     label: 'Memory',     unit: '%',  warnT: 65,  critT: 80,   color: '#bc8cff' },
-  { key: 'latency',    label: 'Latency',    unit: 'ms', warnT: 800, critT: 1500, color: '#ffa657' },
-  { key: 'error_rate', label: 'Error Rate', unit: '%',  warnT: 5,   critT: 10,   color: '#f85149' },
-];
-
-const HISTORY_LEN = 60;
-const history = {};
-METRICS.forEach(m => history[m.key] = []);
-
-const metricsRow = document.getElementById('metricsRow');
-METRICS.forEach(m => {
-  const card = document.createElement('div');
-  card.className = 'metric-card normal';
-  card.id = `card-${m.key}`;
-  card.innerHTML = `
-    <div class="metric-label">${m.label}</div>
-    <div>
-      <span class="metric-value normal" id="val-${m.key}">—</span>
-      <span class="metric-unit">${m.unit}</span>
-    </div>
-    <div class="metric-sub" id="sub-${m.key}">waiting for data…</div>
-    <div class="sparkline-wrap">
-      <svg class="sparkline" id="spark-${m.key}" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
-    </div>
-  `;
-  metricsRow.appendChild(card);
-});
-
-function renderSparkline(key, color) {
-  const svg = document.getElementById(`spark-${key}`);
-  const data = history[key];
-  if (data.length < 2) return;
-  const W = 200, H = 36, PAD = 2;
-  const min = Math.min(...data), max = Math.max(...data);
-  const range = max - min || 1;
-  const pts = data.map((v, i) => {
-    const x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
-    const y = PAD + (1 - (v - min) / range) * (H - PAD * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const last = pts[pts.length - 1].split(',');
-  const first = pts[0].split(',');
-  svg.innerHTML = `
-    <defs>
-      <linearGradient id="grad-${key}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${color}" stop-opacity=".35"/>
-        <stop offset="100%" stop-color="${color}" stop-opacity=".02"/>
-      </linearGradient>
-    </defs>
-    <polygon points="${pts.join(' ')} ${last[0]},${H} ${first[0]},${H}" fill="url(#grad-${key})"/>
-    <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${last[0]}" cy="${last[1]}" r="2.5" fill="${color}"/>
-  `;
-}
-
-function updateCard(key, value) {
-  const cfg = METRICS.find(x => x.key === key);
-  if (!cfg) return;
-  history[key].push(value);
-  if (history[key].length > HISTORY_LEN) history[key].shift();
-
-  const status = value >= cfg.critT ? 'critical' : value >= cfg.warnT ? 'warning' : 'normal';
-  document.getElementById(`card-${key}`).className = `metric-card ${status}`;
-  const valEl = document.getElementById(`val-${key}`);
-  valEl.className = `metric-value ${status}`;
-  valEl.textContent = value.toFixed(1);
-
-  const arr = history[key];
-  const delta = arr.length > 1 ? value - arr[arr.length - 2] : 0;
-  const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '→';
-  document.getElementById(`sub-${key}`).textContent = `${arrow} ${Math.abs(delta).toFixed(2)} ${cfg.unit}  |  ${status.toUpperCase()}`;
-  renderSparkline(key, cfg.color);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// ALERT FEED
-// ══════════════════════════════════════════════════════════════════
-
-let alertCount = 0;
-const alertFeed    = document.getElementById('alertFeed');
-const alertCountEl = document.getElementById('alertCount');
-
-function addAlert(a) {
-  document.getElementById('alertEmpty')?.remove();
-  alertCount++;
-  alertCountEl.textContent = alertCount;
-
-  const div = document.createElement('div');
-  div.className = `alert-item ${a.severity}`;
-  div.id = `alert-${a.id}`;
-  div.innerHTML = `
-    <div class="alert-top">
-      <span class="alert-metric ${a.severity}">${a.metric}</span>
-      <span class="alert-sev ${a.severity}">${a.severity.toUpperCase()}</span>
-    </div>
-    <div class="alert-msg">${a.message}</div>
-    <div class="alert-ts"><span class="alert-id">${a.id}</span> · ${new Date(a.timestamp).toLocaleTimeString()}</div>
-  `;
-  alertFeed.insertBefore(div, alertFeed.firstChild);
-  while (alertFeed.children.length > 50) alertFeed.removeChild(alertFeed.lastChild);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// AI PANEL
-// ══════════════════════════════════════════════════════════════════
-
-let aiCount = 0;
-const aiPanel    = document.getElementById('aiPanel');
-const aiCountEl  = document.getElementById('aiCount');
-
-function addAIPending(alertId) {
-  document.getElementById('aiEmpty')?.remove();
-  if (document.getElementById(`ai-${alertId}`)) return;
-  const div = document.createElement('div');
-  div.className = 'ai-item';
-  div.id = `ai-${alertId}`;
-  div.innerHTML = `
-    <div class="ai-header"><span class="ai-icon">🤖</span><span class="ai-alert-id">${alertId}</span></div>
-    <div class="ai-loading"><div class="spinner"></div> Analyzing…</div>
-  `;
-  aiPanel.insertBefore(div, aiPanel.firstChild);
-}
-
-function addAIResponse(r) {
-  if (r.error) {
-    document.getElementById(`ai-${r.alert_id}`)?.insertAdjacentHTML('beforeend', `<div class="ai-error">⚠ ${r.error}</div>`);
-    return;
-  }
-  aiCount++;
-  aiCountEl.textContent = aiCount;
-
-  let div = document.getElementById(`ai-${r.alert_id}`);
-  if (!div) {
-    document.getElementById('aiEmpty')?.remove();
-    div = document.createElement('div');
-    div.className = 'ai-item';
-    div.id = `ai-${r.alert_id}`;
-    aiPanel.insertBefore(div, aiPanel.firstChild);
-  }
-  div.innerHTML = `
-    <div class="ai-header">
-      <span class="ai-icon">🤖</span>
-      <span class="ai-alert-id">${r.alert_id}</span>
-      <span class="ai-conf ${r.confidence || 'low'}">${(r.confidence||'?').toUpperCase()}</span>
-    </div>
-    <div class="ai-section-title">Root Cause</div>
-    <div class="ai-text">${escHtml(r.root_cause || '')}</div>
-    <div class="ai-section-title">Remediation</div>
-    <div class="ai-text">${formatRemediation(r.remediation || '')}</div>
-    <div class="ai-ts">Model: ${r.model || '—'} · ${new Date(r.timestamp).toLocaleTimeString()}</div>
-  `;
-  while (aiPanel.children.length > 20) aiPanel.removeChild(aiPanel.lastChild);
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function formatRemediation(s) {
-  if (!s) return '';
-  const esc = escHtml(s);
-  const lines = esc.split(/\n/).filter(l => l.trim());
-  if (lines.length <= 1) return `<span>${esc}</span>`;
-  return lines.map(l => `<div style="padding:2px 0;">• ${l.replace(/^\d+\.\s*/,'').trim()}</div>`).join('');
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SIMULATOR CONTROLS
-// ══════════════════════════════════════════════════════════════════
-
-const triggerState = { cpu: false, memory: false, latency: false, error: false };
-
-function trigger(type) {
-  triggerState[type] = !triggerState[type];
-  const ids = { cpu: 'btnCPU', memory: 'btnMemory', latency: 'btnLatency', error: 'btnError' };
-  document.getElementById(ids[type]).classList.toggle('active', triggerState[type]);
-  fetch('/api/trigger', {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ cpu: triggerState.cpu, memory: triggerState.memory, latency: triggerState.latency, error_rate: triggerState.error }),
-  });
-}
-
-function resetAll() {
-  Object.keys(triggerState).forEach(k => triggerState[k] = false);
-  ['btnCPU','btnMemory','btnLatency','btnError'].forEach(id => document.getElementById(id).classList.remove('active'));
-  fetch('/api/reset', { method: 'POST', headers: authHeaders() });
-}
-
-// ══════════════════════════════════════════════════════════════════
-// CLOCK
-// ══════════════════════════════════════════════════════════════════
-
-const clockEl = document.getElementById('clockEl');
-setInterval(() => { clockEl.textContent = new Date().toUTCString().replace('GMT','UTC'); }, 1000);
-clockEl.textContent = new Date().toUTCString().replace('GMT','UTC');
-
-// ══════════════════════════════════════════════════════════════════
-// WEBSOCKET
-// ══════════════════════════════════════════════════════════════════
-
-const wsDot   = document.getElementById('wsDot');
-const wsLabel = document.getElementById('wsLabel');
-let ws, reconnectTimer;
-
-function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const tokenParam = AUTH_TOKEN ? `?token=${encodeURIComponent(AUTH_TOKEN)}` : '';
-  ws = new WebSocket(`${proto}://${location.host}/ws${tokenParam}`);
-
-  ws.onopen = () => {
-    wsDot.classList.add('connected');
-    wsLabel.textContent = 'Connected';
-    clearTimeout(reconnectTimer);
-  };
-  ws.onclose = () => {
-    wsDot.classList.remove('connected');
-    wsLabel.textContent = 'Reconnecting…';
-    reconnectTimer = setTimeout(connect, 2000);
-  };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (evt) => {
-    let msg;
-    try { msg = JSON.parse(evt.data); } catch { return; }
-    switch (msg.type) {
-      case 'metrics': {
-        const p = msg.payload;
-        updateCard('cpu',        p.cpu);
-        updateCard('memory',     p.memory);
-        updateCard('latency',    p.latency);
-        updateCard('error_rate', p.error_rate);
-        break;
-      }
-      case 'alert':       addAlert(msg.payload); addAIPending(msg.payload.id); break;
-      case 'ai_response': addAIResponse(msg.payload); break;
-    }
-  };
-}
-
-connect();
 </script>
 </body>
 </html>
