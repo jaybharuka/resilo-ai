@@ -3,1073 +3,1277 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Resilo — Dashboard</title>
+  <title>Resilo — AIOps Console</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --bg:       #0d1117;
+      --bg2:      #090d13;
       --surface:  #161b22;
-      --surface2: #21262d;
+      --surface2: #1c2230;
+      --surface3: #21262d;
       --border:   #30363d;
+      --border2:  #21262d;
       --text:     #e6edf3;
-      --muted:    #8b949e;
-      --accent:   #58a6ff;
+      --muted:    #7d8590;
+      --muted2:   #586069;
+      --accent:   #00cfff;
+      --accent2:  #0080ff;
       --green:    #3fb950;
-      --yellow:   #d29922;
+      --yellow:   #e3b341;
+      --orange:   #f0883e;
       --red:      #f85149;
+      --purple:   #bc8cff;
+      --mono:     'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
-    /* ── Header ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ══ Header ══════════════════════════════════════════════════ */
     header {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      padding: 0 20px;
-      gap: 14px;
-      height: 52px;
+      padding: 0 16px;
+      gap: 12px;
+      height: 48px;
       flex-shrink: 0;
-      position: sticky;
-      top: 0;
-      z-index: 100;
+      z-index: 200;
     }
-    .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
-    .logo span { color: var(--muted); font-weight: 400; }
-    .spacer { flex: 1; }
-    .ts { font-size: 11px; color: var(--muted); }
-    .btn-logout {
+
+    .logo {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 1px;
+      text-decoration: none;
+    }
+    .logo .slash { color: var(--muted); margin: 0 2px; }
+
+    .ws-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background .3s;
+    }
+    .ws-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .ws-dot.error     { background: var(--red); }
+
+    .ws-label { color: var(--muted); font-size: 10px; }
+    .hdr-sep  { width: 1px; height: 24px; background: var(--border); }
+    .spacer   { flex: 1; }
+
+    .utc-clock {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .5px;
+    }
+
+    .nav-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color .15s, background .15s;
+    }
+    .nav-link:hover  { color: var(--text); background: var(--surface3); }
+    .nav-link.active { color: var(--accent); }
+
+    .alert-dot {
+      display: none;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      margin-left: -6px;
+      margin-top: -8px;
+      animation: pulse-red 1.2s ease-in-out infinite;
+      align-self: flex-start;
+    }
+    .alert-dot.visible { display: block; }
+
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .6; transform: scale(1.3); }
+    }
+
+    .btn-signout {
       background: transparent;
       border: 1px solid var(--border);
-      border-radius: 5px;
+      border-radius: 4px;
       color: var(--muted);
       cursor: pointer;
       font-size: 11px;
-      padding: 4px 10px;
+      padding: 3px 10px;
+      transition: border-color .15s, color .15s;
     }
-    .btn-logout:hover { border-color: var(--red); color: var(--red); }
+    .btn-signout:hover { border-color: var(--red); color: var(--red); }
 
-    /* ── Workspace (two-column when detail open) ── */
-    .workspace {
+    /* ══ Main Three-Column Layout ════════════════════════════════ */
+    .main {
       display: flex;
       flex: 1;
       overflow: hidden;
       min-height: 0;
     }
 
-    /* ── Left column: monitors ── */
-    .monitors-col {
-      flex: 1;
-      min-width: 300px;
-      overflow-y: auto;
-      padding: 20px;
-      transition: max-width .2s ease;
-    }
-    .workspace.detail-open .monitors-col {
-      max-width: 400px;
+    /* ── LEFT column ── */
+    .col-left {
+      width: 280px;
+      flex-shrink: 0;
+      background: var(--bg2);
       border-right: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
 
-    /* ── Section heading ── */
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--muted);
-      letter-spacing: .8px;
+    .col-section {
+      padding: 12px;
+      border-bottom: 1px solid var(--border2);
+    }
+
+    .col-section-title {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 1.2px;
       text-transform: uppercase;
-      margin-bottom: 14px;
+      color: var(--muted2);
+      margin-bottom: 10px;
+    }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 10px 12px 8px;
+      margin-bottom: 8px;
+      transition: border-color .2s;
+    }
+    .metric-card[data-status="warn"] { border-color: var(--yellow); }
+    .metric-card[data-status="crit"] { border-color: var(--red); box-shadow: 0 0 8px rgba(248,81,73,.15); }
+
+    .metric-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .metric-name {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+    }
+    .metric-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--surface3);
+      color: var(--muted);
+    }
+    .metric-card[data-status="ok"]   .metric-badge { background: rgba(63,185,80,.15); color: var(--green); }
+    .metric-card[data-status="warn"] .metric-badge { background: rgba(227,179,65,.15); color: var(--yellow); }
+    .metric-card[data-status="crit"] .metric-badge { background: rgba(248,81,73,.15); color: var(--red); animation: pulse-text 1s ease infinite; }
+
+    @keyframes pulse-text { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .metric-card[data-status="warn"] .metric-value { color: var(--yellow); }
+    .metric-card[data-status="crit"] .metric-value { color: var(--red); }
+
+    .metric-canvas { display: block; width: 100%; height: 36px; }
+
+    .svc-selector { display: flex; gap: 6px; margin-bottom: 6px; }
+    .svc-btn {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 5px 0;
+      text-align: center;
+      transition: all .15s;
+    }
+    .svc-btn.active { background: rgba(0,207,255,.1); border-color: var(--accent); color: var(--accent); }
+
+    .svc-live {
+      font-size: 9px;
+      color: var(--muted2);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .live-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse-green 2s ease infinite;
+    }
+    @keyframes pulse-green { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+    .trigger-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .trigger-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 7px 4px;
+      text-align: center;
+      transition: all .15s;
+    }
+    .trigger-btn:hover { border-color: var(--accent2); color: var(--text); background: var(--surface3); }
+    .trigger-btn.active { border-color: var(--orange); color: var(--orange); background: rgba(240,136,62,.1); }
+    .trigger-btn.reset-btn { grid-column: 1 / -1; }
+    .demo-label { font-size: 9px; color: var(--muted2); text-align: center; margin-top: 6px; letter-spacing: .5px; }
+
+    /* ── CENTER column ── */
+    .col-center {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    .section-count {
+      font-family: var(--mono);
+      font-size: 10px;
+      background: var(--surface3);
+      border-radius: 10px;
+      padding: 1px 7px;
+      color: var(--muted);
+    }
+    .section-count.has-incidents { background: rgba(248,81,73,.2); color: var(--red); }
+
+    .incident-pulse {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      display: none;
+      animation: pulse-red 1.2s ease-in-out infinite;
+    }
+    .incident-pulse.visible { display: block; }
+
+    .all-clear {
+      background: rgba(63,185,80,.08);
+      border: 1px solid rgba(63,185,80,.3);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .all-clear-icon { font-size: 24px; margin-bottom: 6px; }
+    .all-clear-text { color: var(--green); font-size: 13px; font-weight: 600; }
+    .all-clear-sub  { color: var(--muted); font-size: 11px; margin-top: 3px; }
+
+    .incident-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+    .incident-card[data-severity="critical"] { border-left: 3px solid var(--red); }
+    .incident-card[data-severity="warning"]  { border-left: 3px solid var(--yellow); }
+
+    .inc-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .inc-header:hover { background: var(--surface2); }
+
+    .badge-severity {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .badge-severity.critical { background: rgba(248,81,73,.2); color: var(--red); }
+    .badge-severity.warning  { background: rgba(227,179,65,.2); color: var(--yellow); }
+
+    .badge-category {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: rgba(0,207,255,.1);
+      color: var(--accent);
+      flex-shrink: 0;
+      font-family: var(--mono);
+    }
+
+    .inc-metric {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .inc-time {
+      font-size: 10px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .inc-expand {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .inc-body {
+      display: none;
+      padding: 0 12px 12px;
+      border-top: 1px solid var(--border2);
+    }
+    .inc-body.open { display: block; }
+
+    .inc-field { margin-top: 10px; }
+    .inc-field label {
+      display: block;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .inc-field p { font-size: 12px; color: var(--text); line-height: 1.5; }
+
+    .cmd-box {
+      display: block;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 8px 48px 8px 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: #79c0ff;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
+      position: relative;
+    }
+
+    .cmd-copy {
+      position: absolute;
+      top: 6px; right: 6px;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 9px;
+      padding: 2px 6px;
+    }
+    .cmd-copy:hover { color: var(--text); }
+
+    .inc-similar {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 10px;
+      color: var(--purple);
+      background: rgba(188,140,255,.1);
+      border-radius: 3px;
+      padding: 2px 7px;
+      font-family: var(--mono);
+    }
+
+    .recent-header { margin: 20px 0 10px; }
+
+    .recent-table { width: 100%; border-collapse: collapse; }
+    .recent-table th {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: var(--muted2);
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .recent-table td {
+      padding: 7px 8px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border2);
+      color: var(--muted);
+    }
+    .recent-table tr:hover td { background: var(--surface2); }
+    .td-id  { font-family: var(--mono); font-size: 10px; color: var(--muted2); }
+    .td-cat { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+    .td-sev { font-family: var(--mono); font-size: 9px; }
+    .td-dur { font-family: var(--mono); }
+    .td-rc  { color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-sev.critical { color: var(--red); }
+    .td-sev.warning  { color: var(--yellow); }
+
+    .empty-state { text-align: center; padding: 30px; color: var(--muted); font-size: 12px; }
+
+    .resolved-banner {
+      background: rgba(63,185,80,.1);
+      border: 1px solid rgba(63,185,80,.3);
+      border-radius: 5px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--green);
+      margin-bottom: 10px;
+    }
+
+    /* ── RIGHT column ── */
+    .col-right {
+      width: 320px;
+      flex-shrink: 0;
+      background: var(--bg2);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ai-header {
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--border2);
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .badge {
-      background: var(--surface2);
-      border: 1px solid var(--border);
+    .ai-title { font-size: 12px; font-weight: 600; color: var(--accent); flex: 1; }
+    .ai-status-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      padding: 2px 7px;
       border-radius: 10px;
-      padding: 1px 7px;
-      font-size: 10px;
-      color: var(--text);
+      background: var(--surface3);
+      color: var(--muted);
     }
+    .ai-status-badge.thinking { background: rgba(0,207,255,.1); color: var(--accent); animation: pulse-text 1.4s ease infinite; }
+    .ai-status-badge.ready    { background: rgba(63,185,80,.1); color: var(--green); }
 
-    /* ── Add monitor form ── */
-    .add-monitor-form {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
+    .ai-content { flex: 1; padding: 12px 14px; }
+
+    .ai-standby {
       display: flex;
-      gap: 10px;
-      align-items: flex-end;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 20px;
+      text-align: center;
     }
-    .form-field { display: flex; flex-direction: column; gap: 5px; }
-    .form-field label { font-size: 10px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
-    .form-field input, .form-field select {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text);
-      font-size: 12px;
-      padding: 6px 10px;
-      outline: none;
-      min-width: 130px;
+    .ai-standby-icon { font-size: 28px; margin-bottom: 10px; opacity: .4; }
+    .ai-standby-text { color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+    .ai-typing {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 20px;
+      justify-content: center;
     }
-    .form-field input:focus, .form-field select:focus { border-color: var(--accent); }
-    .form-field input[name="url"] { min-width: 220px; }
-    .btn-add {
+    .typing-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
       background: var(--accent);
-      border: none;
-      border-radius: 5px;
-      color: #0d1117;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 6px 16px;
-      white-space: nowrap;
+      animation: typing-bounce 1.4s ease-in-out infinite;
     }
-    .btn-add:hover { opacity: .88; }
-    .btn-add:disabled { opacity: .4; cursor: not-allowed; }
+    .typing-dot:nth-child(2) { animation-delay: .2s; }
+    .typing-dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes typing-bounce {
+      0%, 80%, 100% { transform: scale(.8); opacity: .4; }
+      40%           { transform: scale(1.2); opacity: 1; }
+    }
+    .typing-label { color: var(--muted); font-size: 11px; margin-left: 8px; }
 
-    /* ── Monitor cards ── */
-    .monitor-grid {
+    .ai-response-card { font-size: 12px; }
+    .ai-res-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .ai-res-id   { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .ai-res-conf {
+      font-family: var(--mono);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .ai-res-conf.high   { background: rgba(63,185,80,.15); color: var(--green); }
+    .ai-res-conf.medium { background: rgba(227,179,65,.15); color: var(--yellow); }
+    .ai-res-conf.low    { background: rgba(248,81,73,.15); color: var(--red); }
+    .ai-res-conf.none   { background: var(--surface3); color: var(--muted); }
+    .ai-res-similar { font-family: var(--mono); font-size: 9px; color: var(--purple); padding: 1px 5px; background: rgba(188,140,255,.1); border-radius: 3px; }
+    .ai-res-model   { font-size: 9px; color: var(--muted2); font-family: var(--mono); }
+
+    .ai-field { margin-bottom: 12px; }
+    .ai-field-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--muted);
+      margin-bottom: 4px;
       display: flex;
-      flex-direction: column;
-      gap: 8px;
+      align-items: center;
+      gap: 4px;
     }
-    .monitor-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 14px;
-      cursor: pointer;
-      position: relative;
-      transition: border-color .15s, background .15s;
-      border-left: 3px solid transparent;
-    }
-    .monitor-card:hover { border-color: var(--accent); }
-    .monitor-card.selected { border-color: var(--accent); background: #1c2230; }
-    .monitor-card.up   { border-left-color: var(--green); }
-    .monitor-card.down { border-left-color: var(--red); }
-    .monitor-card.unknown { border-left-color: var(--border); }
-    .monitor-card.selected.up   { border-color: var(--accent); border-left-color: var(--green); }
-    .monitor-card.selected.down { border-color: var(--accent); border-left-color: var(--red); }
+    .ai-field-label::before { content: '▸'; color: var(--accent); }
+    .ai-field p { font-size: 12px; color: var(--text); line-height: 1.6; }
+    .ai-ts { font-size: 9px; color: var(--muted2); font-family: var(--mono); margin-top: 12px; }
 
-    .monitor-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .monitor-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-    .status-badge {
-      font-size: 10px; font-weight: 700; letter-spacing: .5px;
-      padding: 2px 7px; border-radius: 3px; flex-shrink: 0;
-    }
-    .status-badge.up      { background: rgba(63,185,80,.15);  color: var(--green); }
-    .status-badge.down    { background: rgba(248,81,73,.15);  color: var(--red); }
-    .status-badge.unknown { background: var(--surface2); color: var(--muted); }
-
-    .monitor-url   { font-size: 11px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
-    .monitor-meta  { display: flex; gap: 14px; font-size: 10px; color: var(--muted); margin-top: 5px; }
-    .monitor-error { font-size: 10px; color: var(--red); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-    .btn-delete {
-      position: absolute; top: 8px; right: 10px;
-      background: none; border: none; color: transparent;
-      cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 3px;
-    }
-    .monitor-card:hover .btn-delete { color: var(--muted); }
-    .btn-delete:hover { color: var(--red) !important; }
-
-    .btn-edit {
-      position: absolute; top: 8px; right: 34px;
-      background: none; border: none; color: transparent;
-      cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 3px;
-    }
-    .monitor-card:hover .btn-edit { color: var(--muted); }
-    .btn-edit:hover { color: var(--accent) !important; }
-
-    /* ── Inline edit form inside a monitor card ── */
-    .edit-form {
-      display: none;
-      border-top: 1px solid var(--border);
-      margin-top: 10px;
-      padding-top: 12px;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .edit-form.open { display: flex; }
-    .edit-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
-    .edit-field { display: flex; flex-direction: column; gap: 4px; }
-    .edit-field label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-    .edit-field input, .edit-field select {
-      background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
-      color: var(--text); font-size: 12px; padding: 5px 9px; outline: none;
-    }
-    .edit-field input:focus, .edit-field select:focus { border-color: var(--accent); }
-    .edit-field input[name="edit-url"] { min-width: 200px; }
-    .edit-actions { display: flex; gap: 6px; align-items: center; }
-    .btn-save {
-      background: var(--accent); border: none; border-radius: 5px;
-      color: #0d1117; cursor: pointer; font-size: 11px; font-weight: 700; padding: 5px 14px;
-    }
-    .btn-save:hover { opacity: .88; }
-    .btn-save:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-cancel {
-      background: none; border: 1px solid var(--border); border-radius: 5px;
-      color: var(--muted); cursor: pointer; font-size: 11px; padding: 5px 10px;
-    }
-    .btn-cancel:hover { border-color: var(--muted); color: var(--text); }
-    .edit-error { font-size: 11px; color: var(--red); }
-
-    .monitors-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 32px 0; }
-
-    /* ── Right column: detail panel ── */
-    .detail-panel {
-      display: none;
+    .ai-ask { border-top: 1px solid var(--border2); padding: 12px 14px; }
+    .ai-ask-label { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted2); margin-bottom: 8px; }
+    .ask-row { display: flex; gap: 6px; }
+    .ask-input {
       flex: 1;
-      overflow-y: auto;
-      padding: 20px 24px;
-      min-width: 0;
-    }
-    .workspace.detail-open .detail-panel { display: block; }
-
-    .detail-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .detail-name { font-size: 17px; font-weight: 700; }
-    .detail-url  { font-size: 11px; color: var(--accent); margin-top: 3px; }
-    .btn-close {
-      background: none; border: 1px solid var(--border); border-radius: 5px;
-      color: var(--muted); cursor: pointer; font-size: 13px; padding: 3px 8px;
-      flex-shrink: 0;
-    }
-    .btn-close:hover { border-color: var(--muted); color: var(--text); }
-
-    /* ── Stats row ── */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
+      border-radius: 5px;
+      color: var(--text);
+      font-size: 11px;
+      padding: 6px 8px;
+      outline: none;
+      transition: border-color .15s;
     }
-    .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
-    .stat-value { font-size: 24px; font-weight: 700; }
-    .stat-sub   { font-size: 11px; margin-top: 3px; }
-    .stat-value.good { color: var(--green); }
-    .stat-value.warn { color: var(--yellow); }
-    .stat-value.bad  { color: var(--red); }
-
-    /* ── Response time chart ── */
-    .chart-section {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
+    .ask-input:focus { border-color: var(--accent); }
+    .ask-input::placeholder { color: var(--muted2); }
+    .ask-send {
+      background: rgba(0,207,255,.15);
+      border: 1px solid rgba(0,207,255,.3);
+      border-radius: 5px;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 10px;
+      transition: all .15s;
     }
-    .chart-title {
-      font-size: 10px; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 12px;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .chart-title span { font-size: 11px; color: var(--text); text-transform: none; letter-spacing: 0; }
-    svg.rt-chart { width: 100%; height: 140px; display: block; overflow: visible; }
-
-    /* ── Timing breakdown ── */
-    .timing-section {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 14px 16px; margin-bottom: 20px;
-    }
-    .timing-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
-    .timing-bar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg); }
-    .tseg { height: 100%; min-width: 2px; cursor: default; position: relative; }
-    .tseg-dns  { background: #58a6ff; }
-    .tseg-conn { background: #3fb950; }
-    .tseg-ttfb { background: #d29922; }
-    .tseg-rest { background: #484f58; }
-    .timing-legend {
-      display: flex; gap: 14px; font-size: 11px; color: var(--muted);
-      margin-top: 8px; flex-wrap: wrap; align-items: center;
-    }
-    .tleg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-
-    /* ── Outages section ── */
-    .outages-section { }
-    .outages-title {
-      font-size: 10px; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px;
-    }
-    .outage-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-bottom: 8px;
-    }
-    .outage-item.ongoing  { border-left-color: var(--red); }
-    .outage-item.resolved { border-left-color: var(--muted); }
-    .outage-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .outage-ts  { font-size: 11px; color: var(--muted); }
-    .outage-dur { font-size: 11px; font-weight: 600; }
-    .outage-dur.ongoing { color: var(--red); }
-    .outage-dur.resolved { color: var(--muted); }
-    .outage-cause { font-size: 12px; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
-    .outage-remediation {
-      font-size: 11px; color: var(--muted); line-height: 1.6;
-      background: var(--bg); border-radius: 5px; padding: 8px 10px; margin-top: 6px;
-    }
-    .outage-pending { font-size: 11px; color: var(--muted); font-style: italic; }
-    .no-outages { font-size: 12px; color: var(--muted); text-align: center; padding: 20px 0; }
-
-    .loading-msg { color: var(--muted); font-size: 12px; padding: 20px 0; text-align: center; }
-
-    @media (max-width: 700px) {
-      .workspace.detail-open .monitors-col { display: none; }
-      .workspace.detail-open .detail-panel { display: block; }
-      .stats-row { grid-template-columns: 1fr 1fr; }
-    }
+    .ask-send:hover { background: rgba(0,207,255,.25); }
+    .ask-send:disabled { opacity: .4; cursor: default; }
+    .ask-result { margin-top: 8px; font-size: 11px; color: var(--text); line-height: 1.6; }
+    .ask-result.loading { color: var(--muted); }
+    .ask-result.error   { color: var(--red); }
   </style>
 </head>
 <body>
 
+<!-- ══ Header ══════════════════════════════════════════════════════ -->
 <header>
-  <div class="logo">Resilo<span>AI</span></div>
+  <a class="logo" href="/dashboard">RESILO<span class="slash">/</span>OPS</a>
+  <div class="ws-dot" id="wsDot"></div>
+  <span class="ws-label" id="wsLabel">connecting</span>
+  <div class="hdr-sep"></div>
+  <span class="utc-clock" id="utcClock">--:--:-- UTC</span>
   <div class="spacer"></div>
-  <div class="ts" id="clockEl"></div>
-
-  <div id="slugArea" style="display:flex;align-items:center;gap:6px;">
-    <a id="statusPageLink" href="#" target="_blank"
-       style="font-size:11px;color:#58a6ff;border:1px solid #30363d;border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
-      ↗ Status Page
-    </a>
-    <button id="editSlugBtn" onclick="showSlugEdit(event)"
-            style="font-size:11px;background:none;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#8b949e;cursor:pointer;">
-      ✏
-    </button>
-    <div id="slugEditWrap" style="display:none;align-items:center;gap:6px;">
-      <input id="slugInput" type="text" maxlength="30" placeholder="your-slug"
-             style="font-size:11px;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#e6edf3;width:140px;" />
-      <button onclick="saveSlug()"
-              style="font-size:11px;background:#238636;border:none;border-radius:5px;padding:4px 10px;color:#fff;cursor:pointer;">Save</button>
-      <button onclick="hideSlugEdit()"
-              style="font-size:11px;background:none;border:1px solid #30363d;border-radius:5px;padding:4px 8px;color:#8b949e;cursor:pointer;">✕</button>
-      <span id="slugEditMsg" style="font-size:11px;color:#f85149;"></span>
-    </div>
-  </div>
-
-  <a href="/incidents"
-     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
-    📋 Incidents
-  </a>
-
-  <a href="/ask"
-     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
-    🤖 Ask AI
-  </a>
-
-  <a href="/settings"
-     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
-    ⚙ Settings
-  </a>
-
-  <form action="/auth/logout" method="post" style="margin:0;">
-    <button class="btn-logout" type="submit">Sign out</button>
-  </form>
+  <a class="nav-link active" href="/dashboard">Console</a>
+  <a class="nav-link" href="/ask">Ask AI</a>
+  <a class="nav-link" href="/incidents">Incidents</a>
+  <a class="nav-link" href="/settings">Settings</a>
+  <div class="alert-dot" id="hdrAlertDot"></div>
+  <button class="btn-signout" onclick="signOut()">Sign out</button>
 </header>
 
-<div class="workspace" id="workspace">
+<!-- ══ Main ════════════════════════════════════════════════════════ -->
+<div class="main">
 
-  <!-- ── Left: monitor list ── -->
-  <div class="monitors-col" id="monitorsCol">
-    <div class="section-title">
-      URL Monitors
-      <span class="badge" id="monitorCount">0</span>
-      <span style="margin-left:auto;font-size:10px;color:var(--muted);" id="monitorRefreshLabel"></span>
+  <!-- ── Left column ──────────────────────────────────────── -->
+  <div class="col-left">
+
+    <div class="col-section">
+      <div class="col-section-title">Live Metrics</div>
+
+      <div class="metric-card" id="card-cpu" data-status="ok">
+        <div class="metric-header">
+          <span class="metric-name">CPU</span>
+          <span class="metric-badge" id="badge-cpu">OK</span>
+        </div>
+        <div class="metric-value" id="val-cpu">—</div>
+        <canvas id="spark-cpu" class="metric-canvas"></canvas>
+      </div>
+
+      <div class="metric-card" id="card-memory" data-status="ok">
+        <div class="metric-header">
+          <span class="metric-name">Memory</span>
+          <span class="metric-badge" id="badge-memory">OK</span>
+        </div>
+        <div class="metric-value" id="val-memory">—</div>
+        <canvas id="spark-memory" class="metric-canvas"></canvas>
+      </div>
+
+      <div class="metric-card" id="card-latency" data-status="ok">
+        <div class="metric-header">
+          <span class="metric-name">Latency</span>
+          <span class="metric-badge" id="badge-latency">OK</span>
+        </div>
+        <div class="metric-value" id="val-latency">—</div>
+        <canvas id="spark-latency" class="metric-canvas"></canvas>
+      </div>
+
+      <div class="metric-card" id="card-errors" data-status="ok">
+        <div class="metric-header">
+          <span class="metric-name">Error Rate</span>
+          <span class="metric-badge" id="badge-errors">OK</span>
+        </div>
+        <div class="metric-value" id="val-errors">—</div>
+        <canvas id="spark-errors" class="metric-canvas"></canvas>
+      </div>
     </div>
 
-    <form class="add-monitor-form" id="addMonitorForm">
-      <div class="form-field">
-        <label>Name</label>
-        <input type="text" name="name" placeholder="My API" required />
+    <div class="col-section">
+      <div class="col-section-title">Service</div>
+      <div class="svc-selector">
+        <button class="svc-btn active" id="svc-prod-api" onclick="switchService('prod-api')">prod-api</button>
+        <button class="svc-btn" id="svc-prod-db" onclick="switchService('prod-db')">prod-db</button>
       </div>
-      <div class="form-field">
-        <label>URL</label>
-        <input type="url" name="url" placeholder="https://example.com" required />
+      <div class="svc-live">
+        <div class="live-dot"></div>
+        <span id="svcLiveLabel">Live via WebSocket</span>
       </div>
-      <div class="form-field">
-        <label>Method</label>
-        <select name="method" onchange="toggleAddBody(this.value)">
-          <option value="GET">GET</option>
-          <option value="POST">POST</option>
-          <option value="PUT">PUT</option>
-          <option value="DELETE">DELETE</option>
-          <option value="HEAD">HEAD</option>
-        </select>
-      </div>
-      <div class="form-field" id="addBodyField" style="display:none;flex-basis:100%;min-width:200px;">
-        <label>Request body <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-        <textarea name="request_body" placeholder='{"key": "value"}' rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:monospace;font-size:11px;padding:6px 8px;resize:vertical;outline:none;"></textarea>
-      </div>
-      <div class="form-field">
-        <label>Keyword <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-        <input type="text" name="keyword" placeholder="e.g. healthy, Welcome" style="min-width:160px;" />
-      </div>
-      <div class="form-field">
-        <label>Latency alert <span style="color:var(--muted);font-weight:400;">(ms, optional)</span></label>
-        <input type="number" name="latency_threshold" placeholder="e.g. 2000" min="0" style="min-width:120px;" />
-      </div>
-      <div class="form-field">
-        <label>Interval</label>
-        <select name="interval">
-          <option value="60">Every 1 min</option>
-          <option value="300">Every 5 min</option>
-          <option value="600">Every 10 min</option>
-          <option value="1800">Every 30 min</option>
-        </select>
-      </div>
-      <button type="submit" class="btn-add" id="btnAddMonitor">+ Add</button>
-      <div id="limitNote" style="display:none;font-size:11px;color:var(--yellow);margin-top:6px;">
-        Monitor limit reached (max <span id="limitNoteMax"></span>) — contact us to upgrade.
-      </div>
-    </form>
-
-    <div class="monitor-grid" id="monitorGrid">
-      <div class="monitors-empty" id="monitorEmpty">No monitors yet — add one above</div>
     </div>
+
+    <div class="col-section">
+      <div class="col-section-title">Demo Controls</div>
+      <div class="trigger-grid">
+        <button class="trigger-btn" id="tbtn-cpu"      onclick="triggerSpike('cpu')">⚡ CPU Spike</button>
+        <button class="trigger-btn" id="tbtn-memory"   onclick="triggerSpike('memory')">💾 Memory</button>
+        <button class="trigger-btn" id="tbtn-latency"  onclick="triggerSpike('latency')">🌐 Latency</button>
+        <button class="trigger-btn" id="tbtn-error_rate" onclick="triggerSpike('error_rate')">🔥 Errors</button>
+        <button class="trigger-btn reset-btn"          onclick="resetAll()">↺ Reset All</button>
+      </div>
+      <div class="demo-label">Demo controls</div>
+    </div>
+
   </div>
 
-  <!-- ── Right: detail panel ── -->
-  <div class="detail-panel" id="detailPanel">
-    <div class="loading-msg" id="detailLoading">Select a monitor to see details</div>
+  <!-- ── Center column ─────────────────────────────────────── -->
+  <div class="col-center">
+
+    <div id="resolvedBanner" style="display:none"></div>
+
+    <div class="section-header">
+      <span class="section-title">Active Incidents</span>
+      <div class="incident-pulse" id="incPulse"></div>
+      <span class="section-count" id="activeCount">0</span>
+    </div>
+
+    <div id="activeIncidents">
+      <div class="all-clear" id="allClear">
+        <div class="all-clear-icon">✓</div>
+        <div class="all-clear-text">All systems operational</div>
+        <div class="all-clear-sub">No active incidents — monitoring prod-api</div>
+      </div>
+    </div>
+
+    <div class="recent-header section-header">
+      <span class="section-title">Recent Incidents</span>
+      <span class="section-count" id="recentCount">0</span>
+    </div>
+    <div id="recentIncidents">
+      <div class="empty-state">No resolved incidents on record yet.</div>
+    </div>
+
   </div>
 
-</div><!-- /workspace -->
+  <!-- ── Right column ──────────────────────────────────────── -->
+  <div class="col-right">
+
+    <div class="ai-header">
+      <span class="ai-title">⚡ AI Co-pilot</span>
+      <span class="ai-status-badge" id="aiStatusBadge">Standby</span>
+    </div>
+
+    <div class="ai-content" id="aiContent">
+      <div class="ai-standby">
+        <div class="ai-standby-icon">🤖</div>
+        <div class="ai-standby-text">
+          Waiting for an incident.<br>
+          Trigger a spike to see AI diagnostics in real time.
+        </div>
+      </div>
+    </div>
+
+    <div class="ai-ask">
+      <div class="ai-ask-label">Ask your infrastructure</div>
+      <div class="ask-row">
+        <input class="ask-input" id="askInput" placeholder="Why is latency high?" />
+        <button class="ask-send" id="askSend" onclick="submitAsk()">→</button>
+      </div>
+      <div class="ask-result" id="askResult"></div>
+    </div>
+
+  </div>
+
+</div>
 
 <script>
-// ── Injected by server ──────────────────────────────────────────
+// ── Auth token injected by server ────────────────────────────────
 const AUTH_TOKEN = document.querySelector('meta[name="AUTH_TOKEN"]')?.content || '';
-const USER_SLUG  = document.querySelector('meta[name="USER_SLUG"]')?.content  || '';
 
-// ── Helpers ─────────────────────────────────────────────────────
-function authHeaders(extra) {
-  return Object.assign({ 'Content-Type': 'application/json',
-    ...(AUTH_TOKEN ? { 'Authorization': `Bearer ${AUTH_TOKEN}` } : {}) }, extra);
+// ── Utilities ────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&#34;');
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&#34;');
+function apiFetch(url, opts = {}) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  if (AUTH_TOKEN) h['Authorization'] = 'Bearer ' + AUTH_TOKEN;
+  return fetch(url, Object.assign({}, opts, { headers: h, credentials: 'include' }));
 }
 
-function toggleAddBody(method) {
-  const hasBody = method === 'POST' || method === 'PUT' || method === 'DELETE';
-  document.getElementById('addBodyField').style.display = hasBody ? '' : 'none';
-}
-
-function toggleEditBody(id, method) {
-  const hasBody = method === 'POST' || method === 'PUT' || method === 'DELETE';
-  const el = document.getElementById(`edit-body-field-${id}`);
-  if (el) el.style.display = hasBody ? '' : 'none';
-}
-
-function relTime(iso) {
-  if (!iso) return '—';
-  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+function relTime(ms) {
+  const s = Math.floor((Date.now() - ms) / 1000);
   if (s < 60)   return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
-  return `${Math.floor(s/3600)}h ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
 }
 
-function fmtInterval(s) {
+function fmtDur(startMs, endMs) {
+  const s = Math.floor((endMs - startMs) / 1000);
   if (s < 60)   return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)} min`;
-  return `${Math.floor(s / 3600)}h`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-function fmtDur(from, to) {
-  const s = Math.floor((new Date(to) - new Date(from)) / 1000);
-  if (s < 60)   return `${s}s`;
-  if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
-  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+// ── UTC clock ────────────────────────────────────────────────────
+function tickClock() {
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  document.getElementById('utcClock').textContent =
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
 }
-
-// ── Clock ───────────────────────────────────────────────────────
-const clockEl = document.getElementById('clockEl');
-const tickClock = () => { clockEl.textContent = new Date().toLocaleTimeString(); };
 tickClock(); setInterval(tickClock, 1000);
+setInterval(() => {
+  document.querySelectorAll('[data-fired-ms]').forEach(el => {
+    el.textContent = relTime(+el.dataset.firedMs);
+  });
+}, 30000);
 
-// ── Slug editor ─────────────────────────────────────────────────
-let currentSlug = USER_SLUG;
+// ── Ring buffer ──────────────────────────────────────────────────
+class Ring {
+  constructor(n) { this.b = new Array(n).fill(null); this.i = 0; this.n = n; }
+  push(v) { this.b[this.i] = v; this.i = (this.i + 1) % this.n; }
+  toArray() { return [...this.b.slice(this.i), ...this.b.slice(0, this.i)].filter(v => v !== null); }
+}
 
-function applySlug(slug) {
-  currentSlug = slug;
-  const link = document.getElementById('statusPageLink');
-  const area = document.getElementById('slugArea');
-  if (slug) {
-    link.href  = `/status/${slug}`;
-    link.title = `resilo-ai.fly.dev/status/${slug}`;
-    area.style.display = 'flex';
+const rings = { cpu: new Ring(30), memory: new Ring(30), latency: new Ring(30), errors: new Ring(30) };
+
+// ── Sparklines ───────────────────────────────────────────────────
+function drawSparkline(id, data, status) {
+  const canvas = document.getElementById(id);
+  if (!canvas || data.length < 2) return;
+  const dpr = devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = rect.width  || canvas.offsetWidth  || 232;
+  const H = rect.height || canvas.offsetHeight || 36;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const mn = Math.min(...data), mx = Math.max(...data), rng = mx - mn || 1;
+  const pad = 3;
+  const px = i => (i / (data.length - 1)) * (W - pad * 2) + pad;
+  const py = v => H - pad - ((v - mn) / rng) * (H - pad * 2);
+  const clr = { ok: '#3fb950', warn: '#e3b341', crit: '#f85149' }[status] || '#00cfff';
+
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(data[0]));
+  for (let i = 1; i < data.length; i++) ctx.lineTo(px(i), py(data[i]));
+  ctx.lineTo(px(data.length - 1), H);
+  ctx.lineTo(px(0), H);
+  ctx.closePath();
+  ctx.fillStyle = clr + '18';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(data[0]));
+  for (let i = 1; i < data.length; i++) ctx.lineTo(px(i), py(data[i]));
+  ctx.strokeStyle = clr;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  const lx = px(data.length - 1), ly = py(data[data.length - 1]);
+  ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = clr; ctx.fill();
+}
+
+// ── Metric card update ───────────────────────────────────────────
+const THRESH = {
+  cpu:    { warn: 70, crit: 85 },
+  memory: { warn: 75, crit: 85 },
+  latency:{ warn: 300, crit: 500 },
+  errors: { warn: 1, crit: 5 },
+};
+
+function metricStatus(key, v) {
+  const t = THRESH[key]; if (!t) return 'ok';
+  return v >= t.crit ? 'crit' : v >= t.warn ? 'warn' : 'ok';
+}
+
+function updateCard(key, canvasId, value) {
+  const status = metricStatus(key, value);
+  const card   = document.getElementById('card-' + key);   if (!card) return;
+  const valEl  = document.getElementById('val-' + key);
+  const badge  = document.getElementById('badge-' + key);
+  card.setAttribute('data-status', status);
+  badge.textContent = { ok: 'OK', warn: 'WARN', crit: 'CRIT' }[status];
+  valEl.textContent = value.toFixed(key === 'errors' ? 2 : 1) + (key === 'latency' ? 'ms' : '%');
+  rings[key].push(value);
+  drawSparkline(canvasId, rings[key].toArray(), status);
+}
+
+// ── Service selector ─────────────────────────────────────────────
+let currentSvc = 'prod-api';
+let dbPoll = null;
+
+function switchService(job) {
+  currentSvc = job;
+  document.querySelectorAll('.svc-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('svc-' + job).classList.add('active');
+  const label = document.getElementById('svcLiveLabel');
+  if (job === 'prod-api') {
+    label.textContent = 'Live via WebSocket';
+    if (dbPoll) { clearInterval(dbPoll); dbPoll = null; }
   } else {
-    area.style.display = 'none';
+    label.textContent = 'Prometheus snapshot (30s)';
+    pollDbSnapshot();
+    dbPoll = setInterval(pollDbSnapshot, 30000);
   }
 }
 
-function showSlugEdit(e) {
-  e && e.preventDefault();
-  document.getElementById('slugInput').value = currentSlug;
-  document.getElementById('slugEditMsg').textContent = '';
-  document.getElementById('slugEditWrap').style.display = 'flex';
-  document.getElementById('editSlugBtn').style.display  = 'none';
-  document.getElementById('slugInput').focus();
-}
-
-function hideSlugEdit() {
-  document.getElementById('slugEditWrap').style.display = 'none';
-  document.getElementById('editSlugBtn').style.display  = '';
-}
-
-async function saveSlug() {
-  const val = document.getElementById('slugInput').value.trim().toLowerCase();
-  const msg = document.getElementById('slugEditMsg');
-  msg.style.color = '#f85149';
-  if (val.length < 3 || val.length > 30) { msg.textContent = 'Must be 3–30 characters.'; return; }
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(val)) { msg.textContent = 'Letters, numbers, hyphens only.'; return; }
+async function pollDbSnapshot() {
   try {
-    const res  = await fetch('/api/profile/slug', { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ slug: val }) });
-    const data = await res.json();
-    if (!res.ok) { msg.textContent = data.error || 'Failed to save.'; return; }
-    applySlug(data.slug);
-    msg.style.color = '#3fb950';
-    msg.textContent = '✓ Saved';
-    setTimeout(hideSlugEdit, 800);
-  } catch { msg.textContent = 'Network error.'; }
+    const r = await apiFetch('/api/prom/snapshot?job=' + currentSvc);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.cpu    >= 0) updateCard('cpu',     'spark-cpu',     d.cpu);
+    if (d.memory >= 0) updateCard('memory',  'spark-memory',  d.memory);
+    if (d.latency>= 0) updateCard('latency', 'spark-latency', d.latency);
+    if (d.errors >= 0) updateCard('errors',  'spark-errors',  d.errors);
+  } catch (_) {}
 }
 
-document.getElementById('slugInput')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter') saveSlug();
-  if (e.key === 'Escape') hideSlugEdit();
-});
+// ── Trigger panel ────────────────────────────────────────────────
+const activeTriggers = new Set();
 
-applySlug(USER_SLUG);
-
-// ── Monitor list ─────────────────────────────────────────────────
-let monitorsData  = [];
-let selectedId    = null;
-let monitorLimit  = 10; // updated from /api/account/me on load
-
-const monitorGrid    = document.getElementById('monitorGrid');
-const monitorCountEl = document.getElementById('monitorCount');
-
-(async function loadAccountInfo() {
-  const res = await fetch('/api/account/me', { credentials: 'include' });
-  if (res.ok) {
-    const d = await res.json();
-    if (d.max_monitors) monitorLimit = d.max_monitors;
+async function triggerSpike(metric) {
+  const btnId = 'tbtn-' + metric;
+  const btn = document.getElementById(btnId);
+  if (activeTriggers.has(metric)) {
+    activeTriggers.delete(metric);
+    if (btn) btn.classList.remove('active');
+  } else {
+    activeTriggers.add(metric);
+    if (btn) btn.classList.add('active');
   }
-})();
-
-function isUp(m) {
-  if (m.last_status == null) return null;
-  return m.last_status >= 200 && m.last_status < 300;
+  const body = { cpu: false, memory: false, latency: false, error_rate: false };
+  activeTriggers.forEach(k => { body[k] = true; });
+  await apiFetch('/api/trigger', { method: 'POST', body: JSON.stringify(body) });
 }
 
-function renderMonitors(monitors) {
-  monitorsData = monitors;
-  monitorCountEl.textContent = `${monitors.length}/${monitorLimit}`;
+async function resetAll() {
+  activeTriggers.clear();
+  document.querySelectorAll('.trigger-btn').forEach(b => b.classList.remove('active'));
+  await apiFetch('/api/reset', { method: 'POST' });
+}
 
-  const addBtn    = document.getElementById('btnAddMonitor');
-  const limitNote = document.getElementById('limitNote');
-  const atLimit   = monitors.length >= monitorLimit;
-  addBtn.disabled = atLimit;
-  if (limitNote) {
-    limitNote.style.display = atLimit ? 'block' : 'none';
-    const maxSpan = document.getElementById('limitNoteMax');
-    if (maxSpan) maxSpan.textContent = monitorLimit;
-  }
+async function signOut() {
+  await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+  location.href = '/login';
+}
 
-  monitorGrid.querySelectorAll('.monitor-card').forEach(el => el.remove());
-  document.getElementById('monitorEmpty')?.remove();
+// ══ Incidents ═════════════════════════════════════════════════════
+const openIncidents = new Map(); // id → incident object
 
-  if (monitors.length === 0) {
-    const el = document.createElement('div');
-    el.className = 'monitors-empty'; el.id = 'monitorEmpty';
-    el.textContent = 'No monitors yet — add one above';
-    monitorGrid.appendChild(el);
+function renderOpenIncidents() {
+  const container = document.getElementById('activeIncidents');
+  const allClear  = document.getElementById('allClear');
+  const count     = document.getElementById('activeCount');
+  const pulse     = document.getElementById('incPulse');
+  const hdrDot    = document.getElementById('hdrAlertDot');
+
+  const list = [...openIncidents.values()].sort((a, b) => b.firedAt - a.firedAt);
+  count.textContent = list.length;
+
+  if (!list.length) {
+    count.classList.remove('has-incidents');
+    pulse.classList.remove('visible');
+    hdrDot.classList.remove('visible');
+    allClear.style.display = '';
+    container.querySelectorAll('.incident-card').forEach(c => c.remove());
     return;
   }
 
-  monitors.forEach(m => {
-    const up  = isUp(m);
-    const cls = up === null ? 'unknown' : up ? 'up' : 'down';
-    const lbl = up === null ? 'PENDING'  : up ? 'UP'  : 'DOWN';
+  count.classList.add('has-incidents');
+  pulse.classList.add('visible');
+  hdrDot.classList.add('visible');
+  allClear.style.display = 'none';
 
-    const card = document.createElement('div');
-    card.className = `monitor-card ${cls}${m.id === selectedId ? ' selected' : ''}`;
-    card.dataset.id = m.id;
-    card.onclick = () => selectMonitor(m.id);
+  // Build index of existing cards
+  const existing = new Set();
+  container.querySelectorAll('.incident-card').forEach(c => existing.add(c.id.replace('inc-','')));
 
-    const latency  = m.last_latency_ms != null ? `${m.last_latency_ms}ms` : '—';
-    const interval = m.interval_seconds < 120
-      ? `${m.interval_seconds}s`
-      : m.interval_seconds < 3600 ? `${Math.floor(m.interval_seconds/60)}m` : `${Math.floor(m.interval_seconds/3600)}h`;
-    const errHtml = (m.last_error && !up)
-      ? `<div class="monitor-error" title="${escHtml(m.last_error)}">${escHtml(m.last_error.slice(0,80))}</div>` : '';
-
-    card.innerHTML = `
-      <div class="monitor-top">
-        <span class="monitor-name" title="${escHtml(m.name)}">${escHtml(m.name)}</span>
-        <span class="status-badge ${cls}">${lbl}</span>
-      </div>
-      <div class="monitor-url">
-        ${m.method && m.method !== 'GET' ? `<span style="display:inline-block;background:rgba(88,166,255,.15);color:var(--accent);border:1px solid var(--accent);border-radius:3px;font-size:10px;font-weight:700;padding:1px 5px;margin-right:5px;vertical-align:middle;">${escHtml(m.method)}</span>` : ''}${escHtml(m.url)}
-      </div>
-      ${errHtml}
-      <div class="monitor-meta">
-        <span>⏱ ${latency}</span>
-        <span>🕐 ${relTime(m.last_checked_at)}</span>
-        <span>↻ ${interval}</span>
-        ${m.latency_threshold_ms > 0 ? `<span style="color:var(--yellow);">⚡ >${m.latency_threshold_ms}ms</span>` : ''}
-      </div>
-      <button class="btn-edit"   title="Edit"   onclick="event.stopPropagation();openEdit('${m.id}')">✏</button>
-      <button class="btn-delete" title="Delete" onclick="event.stopPropagation();deleteMonitor('${m.id}')">✕</button>
-      <div class="edit-form" id="edit-form-${m.id}" onclick="event.stopPropagation()">
-        <div class="edit-row">
-          <div class="edit-field">
-            <label>Name</label>
-            <input name="edit-name" value="${escHtml(m.name)}" maxlength="50" style="min-width:120px;" />
-          </div>
-          <div class="edit-field">
-            <label>URL</label>
-            <input name="edit-url" value="${escHtml(m.url)}" type="url" />
-          </div>
-          <div class="edit-field">
-            <label>Method</label>
-            <select name="edit-method" onchange="toggleEditBody('${m.id}', this.value)">
-              ${['GET','POST','PUT','DELETE','HEAD'].map(mt =>
-                `<option value="${mt}" ${(m.method||'GET')===mt?'selected':''}>${mt}</option>`
-              ).join('')}
-            </select>
-          </div>
-          <div class="edit-field" id="edit-body-field-${m.id}" style="${(m.method && m.method!=='GET' && m.method!=='HEAD') ? '' : 'display:none;'}flex-basis:100%;min-width:200px;">
-            <label>Request body</label>
-            <textarea name="edit-request-body" rows="3" placeholder='{"key": "value"}' style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:monospace;font-size:11px;padding:6px 8px;resize:vertical;outline:none;">${escHtml(m.request_body || '')}</textarea>
-          </div>
-          <div class="edit-field">
-            <label>Keyword</label>
-            <input name="edit-keyword" value="${escHtml(m.keyword || '')}" placeholder="optional" style="min-width:110px;" />
-          </div>
-          <div class="edit-field">
-            <label>Latency alert (ms)</label>
-            <input name="edit-latency-threshold" type="number" min="0" value="${m.latency_threshold_ms || ''}" placeholder="optional" style="min-width:110px;" />
-          </div>
-          <div class="edit-field">
-            <label>Interval</label>
-            <select name="edit-interval">
-              <option value="60"   ${m.interval_seconds===60   ? 'selected' : ''}>Every 1 min</option>
-              <option value="300"  ${m.interval_seconds===300  ? 'selected' : ''}>Every 5 min</option>
-              <option value="600"  ${m.interval_seconds===600  ? 'selected' : ''}>Every 10 min</option>
-              <option value="1800" ${m.interval_seconds===1800 ? 'selected' : ''}>Every 30 min</option>
-            </select>
-          </div>
-        </div>
-        <div class="edit-actions">
-          <button class="btn-save" onclick="event.stopPropagation();saveEdit('${m.id}')">Save</button>
-          <button class="btn-cancel" onclick="event.stopPropagation();cancelEdit('${m.id}')">Cancel</button>
-          <span class="edit-error" id="edit-err-${m.id}"></span>
-        </div>
-      </div>
-    `;
-    monitorGrid.appendChild(card);
-  });
-}
-
-// ── Inline edit ─────────────────────────────────────────────────
-function openEdit(id) {
-  // Close any other open edit forms first.
-  document.querySelectorAll('.edit-form.open').forEach(f => {
-    if (f.id !== `edit-form-${id}`) f.classList.remove('open');
-  });
-  const form = document.getElementById(`edit-form-${id}`);
-  if (!form) return;
-  form.classList.toggle('open');
-}
-
-function cancelEdit(id) {
-  const form = document.getElementById(`edit-form-${id}`);
-  if (form) form.classList.remove('open');
-}
-
-async function saveEdit(id) {
-  const form  = document.getElementById(`edit-form-${id}`);
-  const errEl = document.getElementById(`edit-err-${id}`);
-  const btn   = form.querySelector('.btn-save');
-  if (!form) return;
-
-  const name              = form.querySelector('[name="edit-name"]').value.trim();
-  const url               = form.querySelector('[name="edit-url"]').value.trim();
-  const keyword           = form.querySelector('[name="edit-keyword"]').value.trim();
-  const interval          = parseInt(form.querySelector('[name="edit-interval"]').value, 10);
-  const latencyThreshold  = parseInt(form.querySelector('[name="edit-latency-threshold"]').value, 10) || 0;
-  const method            = form.querySelector('[name="edit-method"]').value;
-  const requestBodyEl     = form.querySelector('[name="edit-request-body"]');
-  const requestBody       = requestBodyEl ? requestBodyEl.value.trim() : '';
-
-  errEl.textContent = '';
-
-  // Client-side validation mirrors server.
-  if (!name || name.length > 50) { errEl.textContent = 'Name must be 1–50 chars.'; return; }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    errEl.textContent = 'URL must start with http:// or https://'; return;
-  }
-
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const res = await fetch(`/api/monitors/${id}`, {
-      method: 'PUT', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url, keyword, interval_seconds: interval, latency_threshold_ms: latencyThreshold, method, request_body: requestBody }),
-    });
-    if (res.status === 401) { location.href = '/login'; return; }
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      errEl.textContent = data.error || 'Save failed.';
-      return;
+  list.forEach(inc => {
+    if (existing.has(inc.id)) {
+      // Update existing card (AI data may have arrived)
+      const card = document.getElementById('inc-' + inc.id);
+      if (card) {
+        const wasOpen = card.querySelector('.inc-body.open') !== null;
+        card.setAttribute('data-severity', inc.severity);
+        card.innerHTML = incCardHTML(inc, wasOpen);
+      }
+    } else {
+      const card = document.createElement('div');
+      card.className = 'incident-card';
+      card.id = 'inc-' + inc.id;
+      card.setAttribute('data-severity', inc.severity);
+      card.innerHTML = incCardHTML(inc, true); // auto-expand new incidents
+      container.insertBefore(card, container.firstChild);
     }
-    form.classList.remove('open');
-    await fetchMonitors();
-    // Re-open detail panel for this monitor if it was selected.
-    if (selectedId === id) refreshDetailStats();
-  } catch { errEl.textContent = 'Network error.'; }
-  finally { btn.disabled = false; btn.textContent = 'Save'; }
+  });
+
+  // Remove stale cards
+  container.querySelectorAll('.incident-card').forEach(c => {
+    const id = c.id.replace('inc-','');
+    if (!openIncidents.has(id)) c.remove();
+  });
 }
 
-async function fetchMonitors() {
-  try {
-    const res = await fetch('/api/monitors', { credentials: 'include' });
-    if (res.status === 401) { location.href = '/login'; return; }
-    if (!res.ok) return;
-    const list = await res.json();
-    renderMonitors(list || []);
-    document.getElementById('monitorRefreshLabel').textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    // Refresh detail panel data silently if one is open
-    if (selectedId) refreshDetailStats();
-  } catch (e) { console.error('fetchMonitors:', e); }
-}
+function incCardHTML(inc, expanded) {
+  const sev = inc.severity === 'critical' ? 'critical' : 'warning';
+  const bodyOpenClass = expanded ? ' open' : '';
+  const chevron = expanded ? '▲' : '▼';
 
-async function deleteMonitor(id) {
-  if (!confirm('Delete this monitor?')) return;
-  const res = await fetch(`/api/monitors/${id}`, { method: 'DELETE', credentials: 'include' });
-  if (res.ok) {
-    if (selectedId === id) closeDetail();
-    fetchMonitors();
+  // Defensively parse inc fields in case root_cause is a raw JSON string.
+  const fields = parseAiFields(inc);
+  const action = fields.immediate_action || fields.remediation || '';
+
+  let bodyContent = '';
+  if (fields.root_cause || action) {
+    bodyContent = `
+      ${fields.root_cause ? `<div class="inc-field"><label>Root Cause</label><p>${esc(fields.root_cause)}</p></div>` : ''}
+      ${action ? `<div class="inc-field"><label>Immediate Action</label><div class="cmd-box">${esc(action)}<button class="cmd-copy" onclick="copyText(this)">copy</button></div></div>` : ''}
+      ${fields.verification ? `<div class="inc-field"><label>Verification</label><p>${esc(fields.verification)}</p></div>` : ''}
+      ${fields.prevention ? `<div class="inc-field"><label>Prevention</label><p>${esc(fields.prevention)}</p></div>` : ''}
+      ${inc.similar_count > 0 ? `<span class="inc-similar">📚 ${inc.similar_count} similar past incident${inc.similar_count !== 1 ? 's' : ''}</span>` : ''}`;
+  } else {
+    bodyContent = `<p style="padding-top:6px;color:var(--muted);font-size:11px">Analyzing with AI…</p>`;
   }
+
+  return `
+    <div class="inc-header" onclick="toggleInc('${esc(inc.id)}')">
+      <span class="badge-severity ${sev}">${sev.toUpperCase()}</span>
+      <span class="badge-category">${esc(inc.category || 'Unknown')}</span>
+      <span class="inc-metric">${esc(inc.message || inc.metric)}</span>
+      <span class="inc-time" data-fired-ms="${inc.firedAt}">${relTime(inc.firedAt)}</span>
+      <button class="inc-expand" onclick="event.stopPropagation();toggleInc('${esc(inc.id)}')">${chevron}</button>
+    </div>
+    <div class="inc-body${bodyOpenClass}" id="inc-body-${esc(inc.id)}">${bodyContent}</div>`;
 }
 
-document.getElementById('addMonitorForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const form = e.target;
-  const btn  = document.getElementById('btnAddMonitor');
-  btn.disabled = true; btn.textContent = 'Adding…';
+function toggleInc(id) {
+  const body = document.getElementById('inc-body-' + id);
+  if (!body) return;
+  body.classList.toggle('open');
+  const btn = body.previousElementSibling?.querySelector('.inc-expand');
+  if (btn) btn.textContent = body.classList.contains('open') ? '▲' : '▼';
+}
+
+function copyText(btn) {
+  const text = btn.parentElement.textContent.replace('copy','').replace('copied!','').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = 'copy'; }, 1500);
+  });
+}
+
+// ── Recent incidents ──────────────────────────────────────────────
+async function loadRecent() {
   try {
-    const res = await fetch('/api/monitors', {
+    const r = await apiFetch('/api/system/incidents?limit=10');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!Array.isArray(data)) return;
+    renderRecent(data.filter(i => i.resolved_at));
+  } catch (_) {}
+}
+
+function extractRootCause(raw) {
+  if (!raw) return '—';
+  const s = String(raw).trim();
+  if (s.startsWith('{')) {
+    try {
+      const p = JSON.parse(s);
+      if (p.root_cause) return p.root_cause;
+    } catch (_) {}
+  }
+  return s;
+}
+
+function renderRecent(list) {
+  const el = document.getElementById('recentIncidents');
+  document.getElementById('recentCount').textContent = list.length;
+  if (!list.length) { el.innerHTML = '<div class="empty-state">No resolved incidents on record yet.</div>'; return; }
+  const rows = list.map(i => {
+    const fired = new Date(i.fired_at).getTime();
+    const res   = i.resolved_at ? new Date(i.resolved_at).getTime() : 0;
+    const dur   = res ? fmtDur(fired, res) : '—';
+    const sc    = i.severity === 'critical' ? 'critical' : 'warning';
+    const rc    = extractRootCause(i.root_cause);
+    const rcDisplay = rc.length > 80 ? rc.slice(0, 79) + '…' : rc;
+    return `<tr>
+      <td class="td-id">${esc(i.id)}</td>
+      <td class="td-cat">${esc(i.category || '—')}</td>
+      <td class="td-sev ${sc}">${esc((i.severity || '').toUpperCase())}</td>
+      <td class="td-dur">${dur}</td>
+      <td class="td-rc" title="${esc(rc)}">${esc(rcDisplay)}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="recent-table">
+    <thead><tr><th>ID</th><th>Category</th><th>Sev</th><th>Dur</th><th>Root Cause</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ══ AI panel ══════════════════════════════════════════════════════
+function showAiTyping() {
+  document.getElementById('aiStatusBadge').textContent = 'Analyzing…';
+  document.getElementById('aiStatusBadge').className = 'ai-status-badge thinking';
+  document.getElementById('aiContent').innerHTML = `
+    <div class="ai-typing">
+      <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+      <span class="typing-label">Analyzing incident…</span>
+    </div>`;
+}
+
+function showAiResponse(rawResp) {
+  const resp = parseAiFields(rawResp);
+  const action = resp.immediate_action || resp.remediation || '';
+  document.getElementById('aiStatusBadge').textContent = 'Ready';
+  document.getElementById('aiStatusBadge').className = 'ai-status-badge ready';
+  const conf = ['high','medium','low','none'].includes(resp.confidence) ? resp.confidence : 'none';
+  const sim  = resp.similar_count > 0
+    ? `<span class="ai-res-similar">📚 ${resp.similar_count} similar</span>` : '';
+  const ts = new Date(resp.timestamp || Date.now()).toLocaleTimeString();
+
+  document.getElementById('aiContent').innerHTML = `
+    <div class="ai-response-card">
+      <div class="ai-res-meta">
+        <span class="ai-res-id">${esc(resp.alert_id)}</span>
+        <span class="ai-res-conf ${conf}">${esc(resp.confidence || 'unknown')}</span>
+        ${sim}
+        <span class="ai-res-model">${esc(resp.model || '')}</span>
+      </div>
+      ${resp.root_cause ? `<div class="ai-field"><div class="ai-field-label">Root Cause</div><p>${esc(resp.root_cause)}</p></div>` : ''}
+      ${action ? `<div class="ai-field"><div class="ai-field-label">Immediate Action</div><div class="cmd-box">${esc(action)}<button class="cmd-copy" onclick="copyText(this)">copy</button></div></div>` : ''}
+      ${resp.verification ? `<div class="ai-field"><div class="ai-field-label">Verification</div><p>${esc(resp.verification)}</p></div>` : ''}
+      ${resp.prevention ? `<div class="ai-field"><div class="ai-field-label">Prevention</div><p>${esc(resp.prevention)}</p></div>` : ''}
+      <div class="ai-ts">Analysis at ${ts}</div>
+    </div>`;
+}
+
+function showAiStandby() {
+  document.getElementById('aiStatusBadge').textContent = 'Standby';
+  document.getElementById('aiStatusBadge').className = 'ai-status-badge';
+  document.getElementById('aiContent').innerHTML = `
+    <div class="ai-standby">
+      <div class="ai-standby-icon">🤖</div>
+      <div class="ai-standby-text">Waiting for an incident.<br>Trigger a spike to see AI diagnostics in real time.</div>
+    </div>`;
+}
+
+// ── Ask inline ───────────────────────────────────────────────────
+async function submitAsk() {
+  const input  = document.getElementById('askInput');
+  const btn    = document.getElementById('askSend');
+  const result = document.getElementById('askResult');
+  const q = input.value.trim();
+  if (!q) return;
+  btn.disabled = true;
+  result.className = 'ask-result loading';
+  result.textContent = 'Analyzing…';
+  try {
+    const r = await fetch('/api/ask', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name:                 form.name.value.trim(),
-        url:                  form.url.value.trim(),
-        keyword:              form.keyword.value.trim(),
-        interval_seconds:     parseInt(form.interval.value, 10),
-        latency_threshold_ms: parseInt(form.latency_threshold.value, 10) || 0,
-        method:               form.method.value,
-        request_body:         (form.request_body ? form.request_body.value.trim() : ''),
-      }),
+      body: JSON.stringify({ question: q }),
     });
-    if (res.status === 401) { location.href = '/login'; return; }
-    if (res.status === 429) {
-      const d = await res.json().catch(() => ({}));
-      const limitNote = document.getElementById('limitNote');
-      if (limitNote) limitNote.style.display = 'block';
-      alert(d.error || 'Monitor limit reached');
-      return;
-    }
-    if (res.ok) { form.reset(); await fetchMonitors(); }
-    else { alert('Error: ' + await res.text()); }
-  } catch (e) { console.error(e); }
-  finally { btn.disabled = false; btn.textContent = '+ Add'; }
+    const d = await r.json();
+    if (!r.ok) { result.className = 'ask-result error'; result.textContent = d.error || 'Error'; }
+    else { result.className = 'ask-result'; result.innerHTML = mdToHtml(d.answer || ''); input.value = ''; }
+  } catch (e) {
+    result.className = 'ask-result error'; result.textContent = 'Network error: ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+document.getElementById('askInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAsk(); }
 });
 
-// ── Detail panel ─────────────────────────────────────────────────
-const workspace   = document.getElementById('workspace');
-const detailPanel = document.getElementById('detailPanel');
-
-function closeDetail() {
-  selectedId = null;
-  workspace.classList.remove('detail-open');
-  detailPanel.innerHTML = '<div class="loading-msg">Select a monitor to see details</div>';
-  monitorGrid.querySelectorAll('.monitor-card').forEach(c => c.classList.remove('selected'));
+function mdToHtml(md) {
+  return String(md)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\n\n+/g,'</p><p>')
+    .replace(/\n/g,'<br>')
+    .replace(/^/,'<p>').replace(/$/,'</p>');
 }
 
-async function selectMonitor(id) {
-  if (selectedId === id) { closeDetail(); return; }
-  selectedId = id;
+// ══ WebSocket ══════════════════════════════════════════════════════
+let ws, wsRetry = 0;
+let pendingAi = new Set();
 
-  // Mark selected card
-  monitorGrid.querySelectorAll('.monitor-card').forEach(c =>
-    c.classList.toggle('selected', c.dataset.id === id));
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const tok   = AUTH_TOKEN ? '?token=' + encodeURIComponent(AUTH_TOKEN) : '';
+  ws = new WebSocket(`${proto}://${location.host}/ws${tok}`);
 
-  workspace.classList.add('detail-open');
-  detailPanel.innerHTML = '<div class="loading-msg">Loading…</div>';
-
-  const m = monitorsData.find(x => x.id === id);
-  if (!m) return;
-
-  // Parallel fetch: results + outages
-  const [resultsRes, outagesRes] = await Promise.all([
-    fetch(`/api/monitors/${id}/results?limit=100`, { credentials: 'include' }),
-    fetch(`/api/monitors/${id}/outages`,          { credentials: 'include' }),
-  ]);
-
-  const results = resultsRes.ok  ? (await resultsRes.json()) : [];
-  const outages = outagesRes.ok  ? (await outagesRes.json()) : [];
-
-  renderDetail(m, results || [], outages || []);
+  ws.onopen = () => { wsRetry = 0; setWS('connected'); };
+  ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch {} };
+  ws.onclose   = () => { setWS('disconnected'); setTimeout(connectWS, Math.min(1000 * Math.pow(1.5, wsRetry++), 20000)); };
+  ws.onerror   = () => ws.close();
 }
 
-async function refreshDetailStats() {
-  if (!selectedId) return;
-  const m = monitorsData.find(x => x.id === selectedId);
-  if (!m) return;
-  const [resultsRes, outagesRes] = await Promise.all([
-    fetch(`/api/monitors/${selectedId}/results?limit=100`, { credentials: 'include' }),
-    fetch(`/api/monitors/${selectedId}/outages`,          { credentials: 'include' }),
-  ]);
-  const results = resultsRes.ok ? (await resultsRes.json()) : [];
-  const outages = outagesRes.ok ? (await outagesRes.json()) : [];
-  renderDetail(m, results || [], outages || []);
+function setWS(state) {
+  document.getElementById('wsDot').className   = 'ws-dot ' + (state === 'connected' ? 'connected' : '');
+  document.getElementById('wsLabel').textContent = state === 'connected' ? 'connected' : 'reconnecting…';
 }
 
-function renderDetail(m, results, outages) {
-  const up  = isUp(m);
-  const cls = up === null ? 'unknown' : up ? 'up' : 'down';
-  const lbl = up === null ? 'PENDING'  : up ? 'UP'  : 'DOWN';
-
-  // Stats: uptime from results, outages this month
-  const now  = Date.now();
-  const week = 7 * 24 * 60 * 60 * 1000;
-  const weekResults = results.filter(r => now - new Date(r.checked_at) < week);
-  const upCount  = weekResults.filter(r => r.status_code >= 200 && r.status_code < 300).length;
-  const uptimePct = weekResults.length > 0 ? (upCount / weekResults.length * 100).toFixed(1) : '—';
-
-  const monthStart  = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
-  const monthOutages = outages.filter(o => new Date(o.started_at) >= monthStart).length;
-
-  const avgLatency = results.length > 0
-    ? Math.round(results.filter(r => r.latency_ms != null).reduce((s, r) => s + r.latency_ms, 0)
-        / results.filter(r => r.latency_ms != null).length)
-    : null;
-
-  const uptimeClass = uptimePct === '—' ? '' : +uptimePct >= 99 ? 'good' : +uptimePct >= 95 ? 'warn' : 'bad';
-
-  // SSL expiry card — only for HTTPS monitors that have cert data.
-  let sslCardHtml = '';
-  if (m.ssl_expiry) {
-    const exp      = new Date(m.ssl_expiry);
-    const daysLeft = Math.floor((exp - Date.now()) / 86400000);
-    const sslColor = daysLeft > 30 ? 'var(--green)' : daysLeft > 7 ? 'var(--yellow)' : 'var(--red)';
-    const sslSub   = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
-    sslCardHtml = `
-      <div class="stat-card">
-        <div class="stat-label">SSL expires</div>
-        <div class="stat-value" style="font-size:15px;color:${sslColor};">${exp.toLocaleDateString()}</div>
-        <div class="stat-sub" style="color:${sslColor};">${sslSub}</div>
-      </div>`;
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'metrics':        onMetrics(msg.payload);       break;
+    case 'alert':          onAlert(msg.payload);          break;
+    case 'ai_response':    onAiResp(msg.payload);         break;
+    case 'alert_resolved': onResolved(msg.payload);       break;
   }
-
-  detailPanel.innerHTML = `
-    <div class="detail-header">
-      <div>
-        <div class="detail-name">
-          <span class="status-badge ${cls}" style="font-size:11px;margin-right:8px;">${lbl}</span>${escHtml(m.name)}
-        </div>
-        <div class="detail-url">${escHtml(m.url)}</div>
-        ${m.method && m.method !== 'GET' ? `<div style="margin-top:5px;"><span style="display:inline-block;background:rgba(88,166,255,.15);color:var(--accent);border:1px solid var(--accent);border-radius:3px;font-size:10px;font-weight:700;padding:1px 6px;">${escHtml(m.method)}</span></div>` : ''}
-        ${m.request_body ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">📤 Body: <span style="font-family:monospace;color:var(--text);">${escHtml(m.request_body.length > 80 ? m.request_body.slice(0,80)+'…' : m.request_body)}</span></div>` : ''}
-        ${m.keyword ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">🔍 Checking for: <span style="color:var(--text);font-weight:600;">"${escHtml(m.keyword)}"</span></div>` : ''}
-        ${m.last_error && m.last_error.startsWith('keyword not found')
-          ? `<div style="margin-top:4px;font-size:11px;color:var(--red);">⚠ ${escHtml(m.last_error)}</div>` : ''}
-        ${m.latency_threshold_ms > 0 ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">⚡ Latency alert threshold: <span style="color:var(--yellow);font-weight:600;">${m.latency_threshold_ms}ms</span></div>` : ''}
-      </div>
-      <button class="btn-close" onclick="closeDetail()">✕</button>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">7-day uptime</div>
-        <div class="stat-value ${uptimeClass}">${uptimePct === '—' ? '—' : uptimePct + '%'}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Outages this month</div>
-        <div class="stat-value ${monthOutages === 0 ? 'good' : monthOutages <= 2 ? 'warn' : 'bad'}">${monthOutages}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Avg response</div>
-        <div class="stat-value">${avgLatency != null ? avgLatency + 'ms' : '—'}</div>
-      </div>
-      ${sslCardHtml}
-    </div>
-
-    ${buildTimingBar(results)}
-
-    <div class="chart-section">
-      <div class="chart-title">
-        Response time — last ${results.length} check${results.length === 1 ? '' : 's'}
-        <span>${relTime(m.last_checked_at)}</span>
-      </div>
-      ${buildChart(results)}
-      <div style="font-size:10px;color:var(--muted);margin-top:8px;">
-        Checks run every ${fmtInterval(m.interval_seconds)} — chart fills over time.
-      </div>
-    </div>
-
-    <div class="outages-section">
-      <div class="outages-title">Recent outages</div>
-      ${buildOutages(outages.slice(0, 5))}
-    </div>
-  `;
 }
 
-// ── Timing breakdown bar ─────────────────────────────────────────
-function buildTimingBar(results) {
-  const timed = results.filter(r => r.dns_ms != null && r.latency_ms != null && r.latency_ms > 0);
-  if (!timed.length) return '';
-
-  const avg = fn => Math.round(timed.reduce((s, r) => s + fn(r), 0) / timed.length);
-  const avgDns  = avg(r => r.dns_ms  ?? 0);
-  const avgConn = avg(r => r.connect_ms ?? 0);
-  const avgTtfb = avg(r => r.ttfb_ms ?? 0);
-  const avgLat  = avg(r => r.latency_ms);
-  const avgRest = Math.max(0, avgLat - avgDns - avgConn - avgTtfb);
-  const total   = avgDns + avgConn + avgTtfb + avgRest || 1;
-  const pct     = v => ((v / total) * 100).toFixed(1);
-
-  const seg = (cls, val, label) => val > 0
-    ? `<div class="tseg ${cls}" style="width:${pct(val)}%;" title="${label}: ${val}ms"></div>` : '';
-
-  return `
-    <div class="timing-section">
-      <div class="timing-label">Avg timing breakdown — ${timed.length} sampled check${timed.length === 1 ? '' : 's'}</div>
-      <div class="timing-bar">
-        ${seg('tseg-dns',  avgDns,  'DNS')}
-        ${seg('tseg-conn', avgConn, 'TCP connect')}
-        ${seg('tseg-ttfb', avgTtfb, 'TTFB')}
-        ${seg('tseg-rest', avgRest, 'Body transfer')}
-      </div>
-      <div class="timing-legend">
-        <span><span class="tleg-dot tseg-dns"></span>DNS ${avgDns}ms</span>
-        <span><span class="tleg-dot tseg-conn"></span>Connect ${avgConn}ms</span>
-        <span><span class="tleg-dot tseg-ttfb"></span>TTFB ${avgTtfb}ms</span>
-        <span><span class="tleg-dot tseg-rest"></span>Transfer ${avgRest}ms</span>
-        <span style="margin-left:auto;color:var(--muted);">Total avg ${avgLat}ms</span>
-      </div>
-    </div>`;
+function onMetrics(m) {
+  if (currentSvc !== 'prod-api') return;
+  if (m.cpu        !== undefined) updateCard('cpu',     'spark-cpu',     m.cpu);
+  if (m.memory     !== undefined) updateCard('memory',  'spark-memory',  m.memory);
+  if (m.latency    !== undefined) updateCard('latency', 'spark-latency', m.latency);
+  if (m.error_rate !== undefined) updateCard('errors',  'spark-errors',  m.error_rate);
 }
 
-// ── SVG line chart ───────────────────────────────────────────────
-function buildChart(results) {
-  if (!results.length) return '<div class="loading-msg">No data yet</div>';
-
-  // Results come newest-first from API; reverse for left→right time order
-  const pts = [...results].reverse();
-
-  const W = 600, H = 120, PX = 10, PY = 10;
-  const latencies = pts.map(r => r.latency_ms ?? 0);
-  const maxL = Math.max(...latencies, 1);
-
-  const x = (i) => PX + (i / Math.max(pts.length - 1, 1)) * (W - PX * 2);
-  const y = (v)  => PY + (1 - v / maxL) * (H - PY * 2);
-
-  // Line path
-  const pathD = pts.map((r, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(r.latency_ms ?? 0).toFixed(1)}`).join(' ');
-
-  // Area fill (close below)
-  const areaD = pathD + ` L${x(pts.length-1).toFixed(1)},${H} L${PX},${H} Z`;
-
-  // Dots — colored by status
-  const dots = pts.map((r, i) => {
-    const ok  = r.status_code >= 200 && r.status_code < 300;
-    const col = !r.status_code || r.error ? '#f85149' : ok ? '#3fb950' : '#f85149';
-    return `<circle cx="${x(i).toFixed(1)}" cy="${y(r.latency_ms ?? 0).toFixed(1)}" r="3" fill="${col}" opacity=".85"/>`;
-  }).join('');
-
-  // Y-axis label
-  const yLabel = `${maxL}ms`;
-
-  return `
-    <svg class="rt-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stop-color="#58a6ff" stop-opacity=".25"/>
-          <stop offset="100%" stop-color="#58a6ff" stop-opacity=".02"/>
-        </linearGradient>
-      </defs>
-      <path d="${areaD}" fill="url(#cg)"/>
-      <path d="${pathD}" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
-      ${dots}
-      <text x="${PX}" y="${PY - 2}" fill="#8b949e" font-size="9">${escHtml(yLabel)}</text>
-      <text x="${PX}" y="${H - 2}"  fill="#8b949e" font-size="9">0ms</text>
-    </svg>
-    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;">
-      <span>${pts.length > 0 ? new Date(pts[0].checked_at).toLocaleString() : ''}</span>
-      <span style="display:flex;gap:10px;">
-        <span style="color:var(--green);">● OK</span>
-        <span style="color:var(--red);">● Error</span>
-      </span>
-      <span>${pts.length > 0 ? new Date(pts[pts.length-1].checked_at).toLocaleString() : ''}</span>
-    </div>`;
+function onAlert(p) {
+  openIncidents.set(p.id, {
+    id: p.id, severity: p.severity, category: p.category,
+    metric: p.metric, message: p.message, firedAt: p.timestamp,
+    similar_count: p.similar_count || 0,
+  });
+  pendingAi.add(p.id);
+  renderOpenIncidents();
+  showAiTyping();
 }
 
-// ── Outage list ──────────────────────────────────────────────────
-function buildOutages(outages) {
-  if (!outages.length) return '<div class="no-outages">No outages recorded — great!</div>';
+// parseAiFields handles the case where the backend stored the raw AI JSON
+// string in root_cause instead of parsing it into individual fields.
+// It tries JSON.parse(resp.root_cause) first; if that succeeds and has
+// expected keys, it promotes those into resp. Otherwise resp is used as-is.
+function parseAiFields(resp) {
+  if (!resp.root_cause) return resp;
+  const s = String(resp.root_cause).trim();
+  if (s.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(s);
+      if (parsed.root_cause || parsed.immediate_action) {
+        return Object.assign({}, resp, {
+          root_cause:       parsed.root_cause       || resp.root_cause,
+          immediate_action: parsed.immediate_action || resp.immediate_action || resp.remediation,
+          verification:     parsed.verification     || resp.verification,
+          prevention:       parsed.prevention       || resp.prevention,
+          confidence:       parsed.confidence       || resp.confidence,
+        });
+      }
+    } catch (_) {}
+  }
+  return resp;
+}
 
-  return outages.map(o => {
-    const ongoing = !o.resolved_at;
-    const dur     = ongoing ? 'Ongoing' : fmtDur(o.started_at, o.resolved_at);
-    const remHtml = o.remediation
-      ? `<div class="outage-remediation">${escHtml(o.remediation).replace(/\n/g,'<br>')}</div>` : '';
-    return `
-      <div class="outage-item ${ongoing ? 'ongoing' : 'resolved'}">
-        <div class="outage-row">
-          <span class="outage-ts">${new Date(o.started_at).toLocaleString()}</span>
-          <span class="outage-dur ${ongoing ? 'ongoing' : 'resolved'}">${dur}</span>
-        </div>
-        ${o.root_cause
-          ? `<div class="outage-cause">${escHtml(o.root_cause)}</div>${remHtml}`
-          : '<div class="outage-pending">AI analysis pending…</div>'}
-      </div>`;
-  }).join('');
+function onAiResp(rawResp) {
+  const resp = parseAiFields(rawResp);
+  pendingAi.delete(resp.alert_id);
+  const inc = openIncidents.get(resp.alert_id);
+  if (inc) {
+    Object.assign(inc, {
+      root_cause:       resp.root_cause,
+      immediate_action: resp.immediate_action || resp.remediation,
+      verification:     resp.verification,
+      prevention:       resp.prevention,
+      similar_count:    resp.similar_count ?? inc.similar_count,
+    });
+    renderOpenIncidents();
+  }
+  showAiResponse(resp);
+}
+
+function onResolved(p) {
+  openIncidents.delete(p.alert_id);
+  renderOpenIncidents();
+
+  const banner = document.getElementById('resolvedBanner');
+  const dur = p.duration_seconds < 60 ? `${p.duration_seconds}s` : `${Math.floor(p.duration_seconds / 60)}m`;
+  banner.style.display = '';
+  banner.innerHTML = `<div class="resolved-banner">✓ ${esc(p.metric || 'Incident')} resolved after ${dur}</div>`;
+  setTimeout(() => { banner.style.display = 'none'; }, 5000);
+
+  if (openIncidents.size === 0) showAiStandby();
+  loadRecent();
 }
 
 // ── Boot ─────────────────────────────────────────────────────────
-fetchMonitors();
-setInterval(fetchMonitors, 30_000);
+loadRecent();
+connectWS();
 </script>
 </body>
 </html>
