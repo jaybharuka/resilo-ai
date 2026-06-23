@@ -91,10 +91,24 @@ func (c *Checker) check(m Monitor) {
 		GotFirstResponseByte: func()                      { ttfbMs = int(time.Since(reqSent).Milliseconds()) },
 	}
 
+	method := m.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var bodyReader io.Reader
+	if m.RequestBody != "" {
+		bodyReader = strings.NewReader(m.RequestBody)
+	}
 	req, reqErr := http.NewRequestWithContext(
 		httptrace.WithClientTrace(context.Background(), trace),
-		http.MethodGet, m.URL, nil,
+		method, m.URL, bodyReader,
 	)
+	if reqErr == nil && m.RequestBody != "" {
+		trimmed := strings.TrimSpace(m.RequestBody)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			req.Header.Set("Content-Type", "application/json")
+		}
+	}
 
 	// Build a MonitorResult for downstream use.
 	var result MonitorResult

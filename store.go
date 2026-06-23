@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS outages (
   status_code  INTEGER,
   error        TEXT,
   FOREIGN KEY (monitor_id) REFERENCES monitors(id)
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  token      TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used       INTEGER DEFAULT 0
 );`
 
 // Store persists alerts and AI responses to SQLite.
@@ -267,6 +274,33 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate users.max_monitors: %w", err)
 		}
 		slog.Info("store: migrated users.max_monitors column")
+	}
+
+	// Migration: add method and request_body columns to monitors.
+	monCols3 := map[string]bool{}
+	mon3Rows, _ := db.Query(`PRAGMA table_info(monitors)`)
+	if mon3Rows != nil {
+		for mon3Rows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if mon3Rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil {
+				monCols3[name] = true
+			}
+		}
+		mon3Rows.Close()
+	}
+	for _, colDef := range []struct{ name, ddl string }{
+		{"method", "ALTER TABLE monitors ADD COLUMN method TEXT DEFAULT 'GET'"},
+		{"request_body", "ALTER TABLE monitors ADD COLUMN request_body TEXT"},
+	} {
+		if !monCols3[colDef.name] {
+			if _, err := db.Exec(colDef.ddl); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate monitors.%s: %w", colDef.name, err)
+			}
+			slog.Info("store: migrated monitors column", "col", colDef.name)
+		}
 	}
 
 	slog.Info("store opened", "path", path, "max_open_conns", 10, "max_idle_conns", 5)
@@ -489,6 +523,53 @@ func (s *Store) DeleteSession(token string) error {
 	return err
 }
 
+// PasswordReset is a single-use token for resetting a forgotten password.
+type PasswordReset struct {
+	Token     string
+	UserID    string
+	ExpiresAt time.Time
+	Used      bool
+}
+
+// CreatePasswordReset generates a 32-byte hex token valid for 1 hour.
+func (s *Store) CreatePasswordReset(userID string) (string, error) {
+	token := GenerateToken() // 32 hex bytes
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		token, userID, expiresAt,
+	)
+	return token, err
+}
+
+// GetPasswordReset returns the reset record, or an error if not found, expired, or already used.
+func (s *Store) GetPasswordReset(token string) (PasswordReset, error) {
+	var pr PasswordReset
+	var expiresAt string
+	var used int
+	err := s.db.QueryRow(
+		`SELECT token, user_id, expires_at, used FROM password_resets WHERE token = ?`, token,
+	).Scan(&pr.Token, &pr.UserID, &expiresAt, &used)
+	if err != nil {
+		return PasswordReset{}, fmt.Errorf("reset token not found")
+	}
+	pr.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt)
+	pr.Used = used == 1
+	if pr.Used {
+		return PasswordReset{}, fmt.Errorf("reset token already used")
+	}
+	if time.Now().After(pr.ExpiresAt) {
+		return PasswordReset{}, fmt.Errorf("reset token expired")
+	}
+	return pr, nil
+}
+
+// MarkPasswordResetUsed prevents a token from being used a second time.
+func (s *Store) MarkPasswordResetUsed(token string) error {
+	_, err := s.db.Exec(`UPDATE password_resets SET used = 1 WHERE token = ?`, token)
+	return err
+}
+
 // GetUserByMonitorID returns the owner of a monitor (used by checker for email routing).
 func (s *Store) GetUserByMonitorID(monitorID string) (User, error) {
 	var u User
@@ -518,6 +599,240 @@ func (s *Store) GetUserBySlug(slug string) (User, error) {
 	}
 	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return u, nil
+}
+
+// GetAllUsersWithMonitors returns every user that has at least one enabled monitor.
+func (s *Store) GetAllUsersWithMonitors() ([]User, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT u.id, u.email, u.password_hash, COALESCE(u.slug,''), COALESCE(u.max_monitors,10), u.created_at
+		FROM users u
+		JOIN monitors m ON m.user_id = u.id AND m.enabled = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		var createdAt string
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Slug, &u.MaxMonitors, &createdAt); err != nil {
+			return nil, err
+		}
+		u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// GetAvgLatencyRange returns the average latency_ms for a monitor over a time window.
+// daysAgo is the start offset from now; daysEnd is the end offset (0 = now).
+func (s *Store) GetAvgLatencyRange(monitorID string, daysAgo, daysEnd int) (float64, error) {
+	startStr := fmt.Sprintf("-%d days", daysAgo)
+	var avg sql.NullFloat64
+	var err error
+	if daysEnd == 0 {
+		err = s.db.QueryRow(`
+			SELECT AVG(latency_ms) FROM monitor_results
+			WHERE monitor_id = ? AND checked_at >= datetime('now', ?)
+			  AND status_code >= 200 AND status_code < 300`,
+			monitorID, startStr,
+		).Scan(&avg)
+	} else {
+		endStr := fmt.Sprintf("-%d days", daysEnd)
+		err = s.db.QueryRow(`
+			SELECT AVG(latency_ms) FROM monitor_results
+			WHERE monitor_id = ? AND checked_at >= datetime('now', ?) AND checked_at < datetime('now', ?)
+			  AND status_code >= 200 AND status_code < 300`,
+			monitorID, startStr, endStr,
+		).Scan(&avg)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return avg.Float64, nil
+}
+
+// GetOutageCountRange counts outages that started within a time window.
+func (s *Store) GetOutageCountRange(monitorID string, daysAgo int) (int, error) {
+	daysStr := fmt.Sprintf("-%d days", daysAgo)
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM outages
+		WHERE monitor_id = ? AND started_at >= datetime('now', ?)`,
+		monitorID, daysStr,
+	).Scan(&count)
+	return count, err
+}
+
+// GetKeywordFailureCount counts checks where the error contains "keyword not found" within N days.
+func (s *Store) GetKeywordFailureCount(monitorID string, daysAgo int) (int, error) {
+	daysStr := fmt.Sprintf("-%d days", daysAgo)
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM monitor_results
+		WHERE monitor_id = ? AND checked_at >= datetime('now', ?)
+		  AND error LIKE '%keyword not found%'`,
+		monitorID, daysStr,
+	).Scan(&count)
+	return count, err
+}
+
+// InfraContext is the full snapshot of a user's infrastructure data used by the Ask AI handler.
+type InfraContext struct {
+	AsOf     string              `json:"as_of"`
+	Monitors []MonitorContext    `json:"monitors"`
+	Outages  []OutageContext     `json:"outages_last_30d"`
+}
+
+// MonitorContext is per-monitor data within InfraContext.
+type MonitorContext struct {
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	URL             string             `json:"url"`
+	Method          string             `json:"method"`
+	Keyword         string             `json:"keyword,omitempty"`
+	Enabled         bool               `json:"enabled"`
+	Status          string             `json:"current_status"`
+	LastCheckedAt   string             `json:"last_checked_at,omitempty"`
+	Uptime7d        float64            `json:"uptime_pct_7d"`
+	Uptime30d       float64            `json:"uptime_pct_30d"`
+	AvgLatency7d    float64            `json:"avg_latency_ms_7d"`
+	AvgLatency30d   float64            `json:"avg_latency_ms_30d"`
+	HourlyLatency7d []HourlyLatency    `json:"hourly_latency_7d"`
+	SSLDaysLeft     *int               `json:"ssl_days_left,omitempty"`
+	KeywordFails7d  int                `json:"keyword_failures_7d,omitempty"`
+}
+
+// HourlyLatency is an hourly average data point for time-series questions.
+type HourlyLatency struct {
+	Hour      string  `json:"hour"`  // "2006-01-02T15"
+	AvgMs     float64 `json:"avg_ms"`
+}
+
+// OutageContext is a recent outage for InfraContext.
+type OutageContext struct {
+	MonitorName     string  `json:"monitor_name"`
+	StartedAt       string  `json:"started_at"`
+	DurationMinutes *int    `json:"duration_minutes,omitempty"`
+	RootCause       string  `json:"root_cause,omitempty"`
+	Ongoing         bool    `json:"ongoing"`
+}
+
+// GetInfraContext gathers all monitoring data for a user into one struct for AI consumption.
+func (s *Store) GetInfraContext(userID string) (InfraContext, error) {
+	ctx := InfraContext{AsOf: time.Now().UTC().Format(time.RFC3339)}
+
+	monitors, err := s.GetMonitorsByUser(userID)
+	if err != nil {
+		return ctx, fmt.Errorf("GetInfraContext monitors: %w", err)
+	}
+
+	for _, m := range monitors {
+		mc := MonitorContext{
+			ID:      m.ID,
+			Name:    m.Name,
+			URL:     m.URL,
+			Method:  m.Method,
+			Keyword: m.Keyword,
+			Enabled: m.Enabled,
+		}
+
+		// Current status.
+		if m.LastStatus != nil {
+			if *m.LastStatus >= 200 && *m.LastStatus < 300 {
+				mc.Status = "up"
+			} else {
+				mc.Status = "down"
+			}
+		} else {
+			mc.Status = "unknown"
+		}
+		if m.LastCheckedAt != nil {
+			mc.LastCheckedAt = *m.LastCheckedAt
+		}
+
+		// Uptime.
+		mc.Uptime7d, _ = s.GetUptimePercent(m.ID, 7)
+		mc.Uptime30d, _ = s.GetUptimePercent(m.ID, 30)
+
+		// Average latency.
+		mc.AvgLatency7d, _ = s.GetAvgLatencyRange(m.ID, 7, 0)
+		mc.AvgLatency30d, _ = s.GetAvgLatencyRange(m.ID, 30, 0)
+
+		// Hourly latency for last 7 days.
+		mc.HourlyLatency7d, _ = s.getHourlyLatency(m.ID, 7)
+
+		// SSL.
+		if m.SSLExpiry != nil && *m.SSLExpiry != "" {
+			if exp, err := time.Parse(time.RFC3339, *m.SSLExpiry); err == nil {
+				days := int(time.Until(exp).Hours() / 24)
+				mc.SSLDaysLeft = &days
+			}
+		}
+
+		// Keyword failures.
+		mc.KeywordFails7d, _ = s.GetKeywordFailureCount(m.ID, 7)
+
+		ctx.Monitors = append(ctx.Monitors, mc)
+	}
+
+	// Recent outages (last 30 days across all monitors).
+	rows, err := s.db.Query(`
+		SELECT o.started_at, o.resolved_at, o.root_cause, m.name
+		FROM outages o JOIN monitors m ON m.id = o.monitor_id
+		WHERE m.user_id = ? AND o.started_at >= datetime('now', '-30 days')
+		ORDER BY o.started_at DESC LIMIT 50`, userID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var oc OutageContext
+			var resolvedAt *string
+			var rootCause *string
+			if err := rows.Scan(&oc.StartedAt, &resolvedAt, &rootCause, &oc.MonitorName); err != nil {
+				continue
+			}
+			if rootCause != nil {
+				oc.RootCause = *rootCause
+			}
+			if resolvedAt != nil {
+				start, _ := time.Parse(time.RFC3339, oc.StartedAt)
+				end, _ := time.Parse(time.RFC3339, *resolvedAt)
+				if !start.IsZero() && !end.IsZero() {
+					mins := int(end.Sub(start).Minutes())
+					oc.DurationMinutes = &mins
+				}
+			} else {
+				oc.Ongoing = true
+			}
+			ctx.Outages = append(ctx.Outages, oc)
+		}
+	}
+
+	return ctx, nil
+}
+
+func (s *Store) getHourlyLatency(monitorID string, days int) ([]HourlyLatency, error) {
+	daysStr := fmt.Sprintf("-%d days", days)
+	rows, err := s.db.Query(`
+		SELECT strftime('%Y-%m-%dT%H', checked_at) AS hour, AVG(latency_ms)
+		FROM monitor_results
+		WHERE monitor_id = ? AND checked_at >= datetime('now', ?)
+		  AND status_code >= 200 AND status_code < 300
+		GROUP BY hour ORDER BY hour`,
+		monitorID, daysStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HourlyLatency
+	for rows.Next() {
+		var hl HourlyLatency
+		if err := rows.Scan(&hl.Hour, &hl.AvgMs); err != nil {
+			continue
+		}
+		out = append(out, hl)
+	}
+	return out, rows.Err()
 }
 
 // GetUptimePercent returns the percentage of successful checks for a monitor over the last N days.
@@ -593,6 +908,8 @@ type Monitor struct {
 	Keyword             string  `json:"keyword"`
 	IntervalSeconds     int     `json:"interval_seconds"`
 	LatencyThresholdMs  int     `json:"latency_threshold_ms"`
+	Method              string  `json:"method"`
+	RequestBody         string  `json:"request_body"`
 	Enabled             bool    `json:"enabled"`
 	CreatedAt           string  `json:"created_at"`
 	LastStatus          *int    `json:"last_status"`
@@ -617,7 +934,7 @@ type MonitorResult struct {
 }
 
 // CreateMonitor inserts a new monitor row.
-func (s *Store) CreateMonitor(userID, name, url, keyword string, intervalSeconds, latencyThresholdMs int) (Monitor, error) {
+func (s *Store) CreateMonitor(userID, name, url, keyword, method, requestBody string, intervalSeconds, latencyThresholdMs int) (Monitor, error) {
 	id := GenerateToken()[:16]
 	now := time.Now().UTC().Format(time.RFC3339)
 	var kwVal interface{}
@@ -628,14 +945,21 @@ func (s *Store) CreateMonitor(userID, name, url, keyword string, intervalSeconds
 	if latencyThresholdMs > 0 {
 		ltVal = latencyThresholdMs
 	}
+	if method == "" {
+		method = "GET"
+	}
+	var rbVal interface{}
+	if requestBody != "" {
+		rbVal = requestBody
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO monitors (id, user_id, name, url, keyword, interval_seconds, latency_threshold_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, userID, name, url, kwVal, intervalSeconds, ltVal, now,
+		`INSERT INTO monitors (id, user_id, name, url, keyword, interval_seconds, latency_threshold_ms, method, request_body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, name, url, kwVal, intervalSeconds, ltVal, method, rbVal, now,
 	)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
-	return Monitor{ID: id, UserID: userID, Name: name, URL: url, Keyword: keyword, IntervalSeconds: intervalSeconds, LatencyThresholdMs: latencyThresholdMs, Enabled: true, CreatedAt: now}, nil
+	return Monitor{ID: id, UserID: userID, Name: name, URL: url, Keyword: keyword, Method: method, RequestBody: requestBody, IntervalSeconds: intervalSeconds, LatencyThresholdMs: latencyThresholdMs, Enabled: true, CreatedAt: now}, nil
 }
 
 // GetMonitorsByUser returns all monitors for a user with the latest result joined.
@@ -643,6 +967,7 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 	rows, err := s.db.Query(`
 		SELECT m.id, m.user_id, m.name, m.url, COALESCE(m.keyword,''), m.interval_seconds,
 		       COALESCE(m.latency_threshold_ms, 0),
+		       COALESCE(m.method,'GET'), COALESCE(m.request_body,''),
 		       m.enabled, m.created_at,
 		       r.status_code, r.latency_ms, r.error, r.checked_at,
 		       m.ssl_expiry, m.latency_alert_sent_at
@@ -663,7 +988,7 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 		var enabled int
 		if err := rows.Scan(
 			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds,
-			&m.LatencyThresholdMs,
+			&m.LatencyThresholdMs, &m.Method, &m.RequestBody,
 			&enabled, &m.CreatedAt,
 			&m.LastStatus, &m.LastLatencyMs, &m.LastError, &m.LastCheckedAt,
 			&m.SSLExpiry, &m.LatencyAlertSentAt,
@@ -681,6 +1006,7 @@ func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 	rows, err := s.db.Query(`
 		SELECT id, user_id, name, url, COALESCE(keyword,''), interval_seconds,
 		       COALESCE(latency_threshold_ms, 0),
+		       COALESCE(method,'GET'), COALESCE(request_body,''),
 		       enabled, created_at, latency_alert_sent_at
 		FROM monitors WHERE enabled = 1`)
 	if err != nil {
@@ -694,7 +1020,7 @@ func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 		var enabled int
 		if err := rows.Scan(
 			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds,
-			&m.LatencyThresholdMs,
+			&m.LatencyThresholdMs, &m.Method, &m.RequestBody,
 			&enabled, &m.CreatedAt, &m.LatencyAlertSentAt,
 		); err != nil {
 			return nil, err
@@ -712,7 +1038,7 @@ func (s *Store) DeleteMonitor(id, userID string) error {
 }
 
 // UpdateMonitor updates editable fields on a monitor owned by the given user.
-func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSeconds, latencyThresholdMs int) error {
+func (s *Store) UpdateMonitor(id, userID, name, url, keyword, method, requestBody string, intervalSeconds, latencyThresholdMs int) error {
 	var kwVal interface{}
 	if keyword != "" {
 		kwVal = keyword
@@ -721,9 +1047,16 @@ func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSec
 	if latencyThresholdMs > 0 {
 		ltVal = latencyThresholdMs
 	}
+	if method == "" {
+		method = "GET"
+	}
+	var rbVal interface{}
+	if requestBody != "" {
+		rbVal = requestBody
+	}
 	res, err := s.db.Exec(
-		`UPDATE monitors SET name = ?, url = ?, keyword = ?, interval_seconds = ?, latency_threshold_ms = ? WHERE id = ? AND user_id = ?`,
-		name, url, kwVal, intervalSeconds, ltVal, id, userID,
+		`UPDATE monitors SET name = ?, url = ?, keyword = ?, interval_seconds = ?, latency_threshold_ms = ?, method = ?, request_body = ? WHERE id = ? AND user_id = ?`,
+		name, url, kwVal, intervalSeconds, ltVal, method, rbVal, id, userID,
 	)
 	if err != nil {
 		return err

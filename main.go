@@ -73,6 +73,7 @@ func main() {
 	go alertEngine.Run()
 
 	checker := newChecker(store, claude, mailer)
+	digest := newDigestRunner(store, claude, mailer)
 
 	// Fan-out simulator metrics to WebSocket clients.
 	go func() {
@@ -81,7 +82,7 @@ func main() {
 		}
 	}()
 
-	mux := newServeMux(hub, sim, alertEngine, store, startTime, cfg)
+	mux := newServeMux(hub, sim, alertEngine, store, mailer, claude, startTime, cfg)
 
 	// WriteTimeout covers the 1800ms /ping sleep plus NVIDIA API calls (~several seconds).
 	srv := &http.Server{
@@ -97,6 +98,9 @@ func main() {
 	defer stop()
 
 	go checker.Run(sigCtx)
+	if mailer != nil {
+		go digest.Run(sigCtx)
+	}
 
 	go func() {
 		slog.Info("aiops-bot starting", "addr", bindAddr)

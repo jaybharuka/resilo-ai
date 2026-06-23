@@ -64,17 +64,16 @@
       margin-bottom: 20px;
     }
 
-    .error-banner {
-      background: rgba(248,81,73,.12);
-      border: 1px solid rgba(248,81,73,.3);
+    .banner {
       border-radius: 5px;
-      color: var(--red);
       font-size: 11px;
       padding: 8px 12px;
       margin-bottom: 16px;
       display: none;
     }
-    .error-banner.show { display: block; }
+    .banner.show { display: block; }
+    .banner.error  { background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.3); color: var(--red); }
+    .banner.success { background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.3); color: var(--green); }
 
     .field {
       margin-bottom: 14px;
@@ -138,7 +137,8 @@
 <div class="card">
   <div class="card-title">Sign in to your account</div>
 
-  <div class="error-banner" id="errorBanner">Invalid email or password.</div>
+  <div class="banner success" id="successBanner">Password reset successfully — please sign in.</div>
+  <div class="banner error"   id="errorBanner">Invalid email or password.</div>
 
   <form method="post" action="/auth/login">
     <div class="field">
@@ -155,12 +155,18 @@
   <div class="footer">
     No account? <a href="/signup">Create one</a>
   </div>
+  <div class="footer" style="margin-top:10px;">
+    <a href="/forgot-password">Forgot your password?</a>
+  </div>
 </div>
 
 <script>
   const params = new URLSearchParams(location.search);
   if (params.get('error') === 'invalid') {
     document.getElementById('errorBanner').classList.add('show');
+  }
+  if (params.get('reset') === '1') {
+    document.getElementById('successBanner').classList.add('show');
   }
 </script>
 </body>

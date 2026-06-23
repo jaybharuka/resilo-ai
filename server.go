@@ -424,6 +424,92 @@ func logoutHandler(store *Store) http.HandlerFunc {
 	}
 }
 
+const resetBaseURL = "https://resilo-ai.fly.dev"
+
+// forgotPasswordHandler accepts an email, creates a reset token, sends the email.
+// Always returns 200 — never reveals whether an email exists.
+func forgotPasswordHandler(store *Store, mailer *Mailer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		msg := map[string]string{"message": "If that email exists you will receive a reset link"}
+
+		user, err := store.GetUserByEmail(strings.TrimSpace(strings.ToLower(req.Email)))
+		if err != nil {
+			// Don't reveal that the email isn't found.
+			json.NewEncoder(w).Encode(msg)
+			return
+		}
+		token, err := store.CreatePasswordReset(user.ID)
+		if err != nil {
+			slog.Error("CreatePasswordReset failed", "err", err)
+			json.NewEncoder(w).Encode(msg)
+			return
+		}
+		if mailer != nil {
+			resetURL := resetBaseURL + "/reset-password?token=" + token
+			if err := mailer.SendPasswordReset(user.Email, resetURL); err != nil {
+				slog.Error("SendPasswordReset email failed", "err", err)
+			}
+		}
+		json.NewEncoder(w).Encode(msg)
+	}
+}
+
+// resetPasswordHandler validates a token and updates the user's password.
+func resetPasswordHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Token       string `json:"token"`
+			NewPassword string `json:"new_password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		if len(req.NewPassword) < 8 {
+			jsonErr(w, http.StatusBadRequest, "password must be at least 8 characters")
+			return
+		}
+		pr, err := store.GetPasswordReset(req.Token)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		hash, err := HashPassword(req.NewPassword)
+		if err != nil {
+			slog.Error("resetPasswordHandler: hash failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		if err := store.UpdatePassword(pr.UserID, hash); err != nil {
+			slog.Error("UpdatePassword failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "server error")
+			return
+		}
+		if err := store.MarkPasswordResetUsed(req.Token); err != nil {
+			slog.Error("MarkPasswordResetUsed failed", "err", err)
+		}
+		slog.Info("password reset completed", "user_id", pr.UserID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "password reset"})
+	}
+}
+
 // metricsHandler writes the Prometheus text exposition format for all aiops metrics.
 // Exempted from auth so Grafana Cloud can scrape without a token.
 func metricsHandler(sim *Simulator, ae *AlertEngine, hub *Hub) http.HandlerFunc {
@@ -466,7 +552,7 @@ func metricsHandler(sim *Simulator, ae *AlertEngine, hub *Hub) http.HandlerFunc 
 	}
 }
 
-func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startTime time.Time, cfg *Config) *http.ServeMux {
+func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, mailer *Mailer, claude *ClaudeClient, startTime time.Time, cfg *Config) *http.ServeMux {
 	rl := newRateLimiter(cfg)
 	mux := http.NewServeMux()
 
@@ -517,13 +603,21 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	mux.HandleFunc("/auth/signup", signupHandler(store))
 	mux.HandleFunc("/auth/login", loginHandler(store))
 	mux.HandleFunc("/auth/logout", logoutHandler(store))
+	mux.HandleFunc("/auth/forgot-password", forgotPasswordHandler(store, mailer))
+	mux.HandleFunc("/auth/reset-password", resetPasswordHandler(store))
 
-	// Login / signup pages.
+	// Login / signup / password reset pages.
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/login.html")
 	})
 	mux.HandleFunc("/signup", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/signup.html")
+	})
+	mux.HandleFunc("/forgot-password", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/forgot.html")
+	})
+	mux.HandleFunc("/reset-password", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/reset.html")
 	})
 
 	// Dashboard — protected by session middleware.
@@ -648,6 +742,12 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	// Profile routes — session-cookie auth.
 	mux.HandleFunc("PUT /api/profile/slug", profileSlugHandler(store))
 
+	// Ask AI page + API.
+	mux.HandleFunc("GET /ask", sessionMiddleware(store, func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/ask.html")
+	}))
+	mux.HandleFunc("POST /api/ask", askHandler(store, claude))
+
 	// Settings page.
 	mux.HandleFunc("GET /settings", sessionMiddleware(store, func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/settings.html")
@@ -726,6 +826,8 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 			Keyword            string `json:"keyword"`
 			IntervalSeconds    int    `json:"interval_seconds"`
 			LatencyThresholdMs int    `json:"latency_threshold_ms"`
+			Method             string `json:"method"`
+			RequestBody        string `json:"request_body"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -737,6 +839,13 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 		}
 		if req.IntervalSeconds <= 0 {
 			req.IntervalSeconds = 60
+		}
+		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true, "HEAD": true}
+		if req.Method == "" {
+			req.Method = "GET"
+		} else if !validMethods[req.Method] {
+			jsonErr(w, http.StatusBadRequest, "method must be one of GET, POST, PUT, DELETE, HEAD")
+			return
 		}
 		count, err := store.GetMonitorCount(user.ID)
 		if err != nil {
@@ -754,7 +863,7 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 			})
 			return
 		}
-		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds, req.LatencyThresholdMs)
+		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.Method, req.RequestBody, req.IntervalSeconds, req.LatencyThresholdMs)
 		if err != nil {
 			slog.Error("CreateMonitor failed", "err", err)
 			http.Error(w, "db error", http.StatusInternalServerError)
@@ -780,6 +889,8 @@ func monitorsUpdateHandler(store *Store) http.HandlerFunc {
 			Keyword            string `json:"keyword"`
 			IntervalSeconds    int    `json:"interval_seconds"`
 			LatencyThresholdMs int    `json:"latency_threshold_ms"`
+			Method             string `json:"method"`
+			RequestBody        string `json:"request_body"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -805,7 +916,14 @@ func monitorsUpdateHandler(store *Store) http.HandlerFunc {
 			json.NewEncoder(w).Encode(map[string]string{"error": "interval must be 60, 300, 600, or 1800 seconds"})
 			return
 		}
-		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds, req.LatencyThresholdMs); err != nil {
+		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true, "HEAD": true}
+		if req.Method == "" {
+			req.Method = "GET"
+		} else if !validMethods[req.Method] {
+			jsonErr(w, http.StatusBadRequest, "method must be one of GET, POST, PUT, DELETE, HEAD")
+			return
+		}
+		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.Method, req.RequestBody, req.IntervalSeconds, req.LatencyThresholdMs); err != nil {
 			slog.Error("UpdateMonitor failed", "err", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -911,6 +1029,67 @@ func incidentsHandler(store *Store) http.HandlerFunc {
 			"page":        page,
 			"limit":       limit,
 			"total_pages": (total + limit - 1) / limit,
+		})
+	}
+}
+
+func askHandler(store *Store, claude *ClaudeClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			Question string `json:"question"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		req.Question = strings.TrimSpace(req.Question)
+		if req.Question == "" {
+			jsonErr(w, http.StatusBadRequest, "question is required")
+			return
+		}
+		if len(req.Question) > 1000 {
+			jsonErr(w, http.StatusBadRequest, "question too long (max 1000 chars)")
+			return
+		}
+
+		infraCtx, err := store.GetInfraContext(user.ID)
+		if err != nil {
+			slog.Error("askHandler: GetInfraContext failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "failed to gather infrastructure data")
+			return
+		}
+
+		if claude == nil {
+			jsonErr(w, http.StatusServiceUnavailable, "AI provider not configured — set ANTHROPIC_API_KEY or NVIDIA_API_KEY")
+			return
+		}
+
+		answer, err := claude.AskInfra(req.Question, infraCtx)
+		if err != nil {
+			slog.Error("askHandler: AskInfra failed", "err", err)
+			jsonErr(w, http.StatusInternalServerError, "AI request failed: "+err.Error())
+			return
+		}
+
+		// Build a brief data-used summary for the UI.
+		monitorNames := make([]string, 0, len(infraCtx.Monitors))
+		for _, m := range infraCtx.Monitors {
+			monitorNames = append(monitorNames, m.Name)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"answer": answer,
+			"data_used": map[string]interface{}{
+				"monitors":       monitorNames,
+				"outages_30d":    len(infraCtx.Outages),
+				"time_range":     "last 30 days",
+				"as_of":          infraCtx.AsOf,
+			},
 		})
 	}
 }

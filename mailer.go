@@ -161,6 +161,150 @@ func (m *Mailer) SendSSLExpiryAlert(to, monitorName, url string, expiresAt time.
 	return m.send(to, subject, body)
 }
 
+// SendWeeklyDigest emails the Monday health summary for all of a user's monitors.
+func (m *Mailer) SendWeeklyDigest(to string, sections []MonitorSection) error {
+	now := time.Now().UTC()
+	weekStr := now.AddDate(0, 0, -7).Format("Jan 2") + " – " + now.Format("Jan 2, 2006")
+	subject := "Your Resilo weekly health digest — " + now.Format("Jan 2")
+
+	monitorRows := ""
+	for _, sec := range sections {
+		s := sec.Stats
+		m_ := s.Monitor
+
+		uptimeColor := "#3fb950"
+		if s.Uptime7d < 99.0 {
+			uptimeColor = "#f85149"
+		} else if s.Uptime7d < 99.9 {
+			uptimeColor = "#d29922"
+		}
+
+		latencyTrend := ""
+		if s.AvgLatencyPrev > 0 && s.AvgLatency7d > 0 {
+			sign := "+"
+			color := "#f85149"
+			val := s.LatencyChangePct
+			if val < 0 {
+				sign = ""
+				color = "#3fb950"
+			}
+			latencyTrend = fmt.Sprintf(` <span style="color:%s;font-size:11px;">(%s%.0f%%)</span>`, color, sign, val)
+		}
+
+		sslRow := ""
+		if s.SSLDaysLeft >= 0 {
+			sslColor := "#3fb950"
+			if s.SSLDaysLeft <= 7 {
+				sslColor = "#f85149"
+			} else if s.SSLDaysLeft <= 30 {
+				sslColor = "#d29922"
+			}
+			sslRow = fmt.Sprintf(`<tr><td style="color:#8b949e;padding:3px 0;font-size:12px;">SSL expires</td><td style="color:%s;font-weight:600;">%d days</td></tr>`, sslColor, s.SSLDaysLeft)
+		}
+
+		kwRow := ""
+		if m_.Keyword != "" {
+			kwColor := "#3fb950"
+			kwText := "0 failures"
+			if s.KeywordFails7d > 0 {
+				kwColor = "#f85149"
+				kwText = fmt.Sprintf("%d failure(s)", s.KeywordFails7d)
+			}
+			kwRow = fmt.Sprintf(`<tr><td style="color:#8b949e;padding:3px 0;font-size:12px;">Keyword checks</td><td style="color:%s;">%s</td></tr>`, kwColor, kwText)
+		}
+
+		latencyCell := "—"
+		if s.AvgLatency7d > 0 {
+			latencyCell = fmt.Sprintf("%.0fms%s", s.AvgLatency7d, latencyTrend)
+		}
+
+		monitorRows += fmt.Sprintf(`
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div>
+        <div style="font-size:15px;font-weight:700;">%s</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px;"><a href="%s" style="color:#58a6ff;text-decoration:none;">%s</a></div>
+      </div>
+      <span style="color:%s;font-size:20px;font-weight:700;">%.2f%%</span>
+    </div>
+    <table style="width:100%%;border-collapse:collapse;margin-bottom:14px;">
+      <tr><td style="color:#8b949e;padding:3px 0;font-size:12px;width:120px;">Uptime (7d)</td><td style="color:%s;font-weight:600;">%.2f%%</td></tr>
+      <tr><td style="color:#8b949e;padding:3px 0;font-size:12px;">Outages</td><td style="color:%s;">%d</td></tr>
+      <tr><td style="color:#8b949e;padding:3px 0;font-size:12px;">Avg latency</td><td>%s</td></tr>
+      %s
+      %s
+    </table>
+    <div style="background:#21262d;border-left:3px solid #58a6ff;border-radius:0 6px 6px 0;padding:12px 14px;font-size:13px;line-height:1.7;color:#e6edf3;">
+      %s
+    </div>
+  </div>`,
+			htmlEscape(m_.Name), m_.URL, htmlEscape(m_.URL),
+			uptimeColor, s.Uptime7d,
+			uptimeColor, s.Uptime7d,
+			func() string {
+				if s.Outages7d == 0 {
+					return "#3fb950"
+				}
+				return "#f85149"
+			}(), s.Outages7d,
+			latencyCell,
+			sslRow, kwRow,
+			htmlEscape(sec.Narrative),
+		)
+	}
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:20px;">
+<div style="max-width:580px;margin:0 auto;">
+  <div style="font-size:20px;font-weight:700;color:#58a6ff;margin-bottom:4px;">ResiloAI</div>
+  <div style="font-size:12px;color:#8b949e;margin-bottom:6px;">Weekly health digest</div>
+  <div style="font-size:11px;color:#8b949e;margin-bottom:24px;">%s</div>
+  %s
+  <p style="margin-top:24px;font-size:11px;color:#8b949e;text-align:center;">
+    <a href="https://resilo-ai.fly.dev/dashboard" style="color:#58a6ff;">View live dashboard</a> ·
+    <a href="https://resilo-ai.fly.dev/incidents" style="color:#58a6ff;">Incident history</a><br><br>
+    Sent by <a href="https://resilo-ai.fly.dev" style="color:#58a6ff;">Resilo AI</a> every Monday at 09:00 UTC
+  </p>
+</div>
+</body></html>`, weekStr, monitorRows)
+
+	return m.send(to, subject, body)
+}
+
+// SendPasswordReset emails a one-time password reset link.
+func (m *Mailer) SendPasswordReset(to, resetURL string) error {
+	subject := "Reset your Resilo password"
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:20px;">
+<div style="max-width:480px;margin:0 auto;">
+  <div style="font-size:20px;font-weight:700;color:#58a6ff;margin-bottom:6px;">ResiloAI</div>
+  <div style="font-size:12px;color:#8b949e;margin-bottom:28px;">AI-powered uptime monitoring</div>
+
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:28px;">
+    <h2 style="margin:0 0 12px;font-size:17px;font-weight:700;">Reset your password</h2>
+    <p style="font-size:13px;color:#8b949e;margin:0 0 24px;line-height:1.6;">
+      We received a request to reset your password. Click the button below to choose a new one.
+    </p>
+    <a href="%s"
+       style="display:inline-block;background:#58a6ff;color:#0d1117;font-weight:700;font-size:14px;
+              padding:11px 28px;border-radius:7px;text-decoration:none;margin-bottom:24px;">
+      Reset password →
+    </a>
+    <p style="font-size:12px;color:#8b949e;margin:0;line-height:1.6;">
+      This link expires in <strong style="color:#e6edf3;">1 hour</strong>.
+      If you didn't request a password reset, you can safely ignore this email.
+    </p>
+  </div>
+  <p style="margin-top:20px;font-size:11px;color:#8b949e;text-align:center;">
+    Sent by <a href="https://resilo-ai.fly.dev" style="color:#58a6ff;">Resilo AI</a>
+  </p>
+</div>
+</body></html>`, resetURL)
+	return m.send(to, subject, body)
+}
+
 // SendLatencyAlert notifies a user that a monitor's response time exceeded the threshold.
 func (m *Mailer) SendLatencyAlert(to, monitorName, url string, latencyMs, thresholdMs int) error {
 	subject := fmt.Sprintf("⚡ Slow Response Detected: %s", monitorName)

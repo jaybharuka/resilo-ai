@@ -268,6 +268,30 @@ func (c *ClaudeClient) callAnthropic(prompt string) (string, error) {
 	return apiResp.Content[0].Text, nil
 }
 
+// AskInfra answers a natural-language question using the user's infrastructure context.
+func (c *ClaudeClient) AskInfra(question string, ctx InfraContext) (string, error) {
+	ctxBytes, err := json.Marshal(ctx)
+	if err != nil {
+		return "", fmt.Errorf("marshal infra context: %w", err)
+	}
+
+	systemPrompt := `You are an infrastructure analyst for a developer. You have access to their monitoring data below. Answer their question in plain English. Be specific — reference actual numbers, dates, and monitor names. If you see concerning patterns mention them even if not asked. If the question cannot be answered from the data, say so honestly. Format your response with clear paragraphs. Use **bold** for important values or names. Keep the answer focused and practical.`
+
+	userMsg := fmt.Sprintf("Infrastructure data (JSON):\n%s\n\nQuestion: %s", string(ctxBytes), question)
+
+	var text string
+	if c.provider == "anthropic" {
+		// For Anthropic we embed the system prompt as a prefixed user message since
+		// the simple callAnthropic helper doesn't take a system param.
+		combined := systemPrompt + "\n\n" + userMsg
+		text, err = c.callAnthropic(combined)
+	} else {
+		combined := systemPrompt + "\n\n" + userMsg
+		text, err = c.callNVIDIA(combined)
+	}
+	return text, err
+}
+
 // AnalyzeOutage asks the AI for a root cause and remediation steps when a monitor goes DOWN.
 func (c *ClaudeClient) AnalyzeOutage(monitor Monitor, result MonitorResult) (rootCause, remediation string, err error) {
 	statusStr := "connection error"

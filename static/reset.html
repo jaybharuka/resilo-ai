@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resilo — Reset password</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --accent:  #58a6ff;
+      --green:   #3fb950;
+      --red:     #f85149;
+      --font:    'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+    body {
+      background: var(--bg); color: var(--text); font-family: var(--font);
+      font-size: 13px; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: .5px; margin-bottom: 8px; }
+    .logo span { color: var(--muted); font-weight: 400; }
+    .tagline { font-size: 11px; color: var(--muted); margin-bottom: 32px; letter-spacing: .5px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 28px 32px; width: 100%; max-width: 360px;
+    }
+    .card-title { font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-size: 11px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 5px; }
+    input[type="password"] {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--text); font-family: var(--font);
+      font-size: 13px; padding: 8px 10px; outline: none; transition: border-color .15s;
+    }
+    input:focus { border-color: var(--accent); }
+    .btn-submit {
+      width: 100%; background: var(--accent); border: none; border-radius: 5px;
+      color: #0d1117; cursor: pointer; font-family: var(--font); font-size: 13px;
+      font-weight: 700; margin-top: 8px; padding: 9px; transition: opacity .15s;
+    }
+    .btn-submit:hover:not(:disabled) { opacity: .88; }
+    .btn-submit:disabled { opacity: .5; cursor: not-allowed; }
+    .footer { font-size: 11px; color: var(--muted); margin-top: 18px; text-align: center; }
+    .footer a { color: var(--accent); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .error-banner {
+      background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.3);
+      border-radius: 5px; color: var(--red); font-size: 11px;
+      padding: 8px 12px; margin-bottom: 14px; display: none;
+    }
+    .error-banner.show { display: block; }
+    /* Expired state */
+    .expired { display: none; text-align: center; padding: 8px 0; }
+    .expired-icon { font-size: 36px; margin-bottom: 12px; }
+    .expired-title { font-size: 15px; font-weight: 700; color: var(--red); margin-bottom: 8px; }
+    .expired-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  </style>
+</head>
+<body>
+
+<div class="logo">Resilo<span>AI</span></div>
+<div class="tagline">AI-powered ops monitoring</div>
+
+<div class="card">
+  <div id="formState">
+    <div class="card-title">Choose a new password</div>
+
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="field">
+      <label for="newPass">New password</label>
+      <input type="password" id="newPass" autocomplete="new-password" autofocus />
+    </div>
+    <div class="field">
+      <label for="confirmPass">Confirm password</label>
+      <input type="password" id="confirmPass" autocomplete="new-password" />
+    </div>
+    <button class="btn-submit" id="submitBtn" onclick="submit()">Reset password</button>
+  </div>
+
+  <div class="expired" id="expiredState">
+    <div class="expired-icon">⏰</div>
+    <div class="expired-title">This reset link has expired</div>
+    <div class="expired-desc">
+      Password reset links are valid for 1 hour and can only be used once.
+    </div>
+    <div style="margin-top:18px;">
+      <a href="/forgot-password" style="color:var(--accent);font-size:12px;">Request a new reset link →</a>
+    </div>
+  </div>
+
+  <div class="footer" id="footerLinks">
+    <a href="/login">← Back to login</a>
+  </div>
+</div>
+
+<script>
+const token = new URLSearchParams(location.search).get('token');
+
+if (!token) {
+  showExpired();
+}
+
+async function submit() {
+  const newPass     = document.getElementById('newPass').value;
+  const confirmPass = document.getElementById('confirmPass').value;
+  const banner      = document.getElementById('errorBanner');
+  banner.classList.remove('show');
+
+  if (newPass.length < 8) {
+    showError('Password must be at least 8 characters.');
+    return;
+  }
+  if (newPass !== confirmPass) {
+    showError('Passwords do not match.');
+    return;
+  }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch('/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPass }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.error || 'Something went wrong.';
+      if (msg.includes('expired') || msg.includes('used') || msg.includes('not found')) {
+        showExpired();
+      } else {
+        showError(msg);
+        btn.disabled = false;
+        btn.textContent = 'Reset password';
+      }
+      return;
+    }
+    location.href = '/login?reset=1';
+  } catch {
+    showError('Network error — please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Reset password';
+  }
+}
+
+function showError(msg) {
+  const b = document.getElementById('errorBanner');
+  b.textContent = msg;
+  b.classList.add('show');
+}
+
+function showExpired() {
+  document.getElementById('formState').style.display = 'none';
+  document.getElementById('expiredState').style.display = 'block';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') submit();
+});
+</script>
+</body>
+</html>

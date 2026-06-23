@@ -380,6 +380,11 @@
     📋 Incidents
   </a>
 
+  <a href="/ask"
+     style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
+    🤖 Ask AI
+  </a>
+
   <a href="/settings"
      style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:4px 10px;text-decoration:none;white-space:nowrap;">
     ⚙ Settings
@@ -408,6 +413,20 @@
       <div class="form-field">
         <label>URL</label>
         <input type="url" name="url" placeholder="https://example.com" required />
+      </div>
+      <div class="form-field">
+        <label>Method</label>
+        <select name="method" onchange="toggleAddBody(this.value)">
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+          <option value="HEAD">HEAD</option>
+        </select>
+      </div>
+      <div class="form-field" id="addBodyField" style="display:none;flex-basis:100%;min-width:200px;">
+        <label>Request body <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+        <textarea name="request_body" placeholder='{"key": "value"}' rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:monospace;font-size:11px;padding:6px 8px;resize:vertical;outline:none;"></textarea>
       </div>
       <div class="form-field">
         <label>Keyword <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
@@ -457,6 +476,17 @@ function authHeaders(extra) {
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&#34;');
+}
+
+function toggleAddBody(method) {
+  const hasBody = method === 'POST' || method === 'PUT' || method === 'DELETE';
+  document.getElementById('addBodyField').style.display = hasBody ? '' : 'none';
+}
+
+function toggleEditBody(id, method) {
+  const hasBody = method === 'POST' || method === 'PUT' || method === 'DELETE';
+  const el = document.getElementById(`edit-body-field-${id}`);
+  if (el) el.style.display = hasBody ? '' : 'none';
 }
 
 function relTime(iso) {
@@ -607,7 +637,9 @@ function renderMonitors(monitors) {
         <span class="monitor-name" title="${escHtml(m.name)}">${escHtml(m.name)}</span>
         <span class="status-badge ${cls}">${lbl}</span>
       </div>
-      <div class="monitor-url">${escHtml(m.url)}</div>
+      <div class="monitor-url">
+        ${m.method && m.method !== 'GET' ? `<span style="display:inline-block;background:rgba(88,166,255,.15);color:var(--accent);border:1px solid var(--accent);border-radius:3px;font-size:10px;font-weight:700;padding:1px 5px;margin-right:5px;vertical-align:middle;">${escHtml(m.method)}</span>` : ''}${escHtml(m.url)}
+      </div>
       ${errHtml}
       <div class="monitor-meta">
         <span>⏱ ${latency}</span>
@@ -626,6 +658,18 @@ function renderMonitors(monitors) {
           <div class="edit-field">
             <label>URL</label>
             <input name="edit-url" value="${escHtml(m.url)}" type="url" />
+          </div>
+          <div class="edit-field">
+            <label>Method</label>
+            <select name="edit-method" onchange="toggleEditBody('${m.id}', this.value)">
+              ${['GET','POST','PUT','DELETE','HEAD'].map(mt =>
+                `<option value="${mt}" ${(m.method||'GET')===mt?'selected':''}>${mt}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="edit-field" id="edit-body-field-${m.id}" style="${(m.method && m.method!=='GET' && m.method!=='HEAD') ? '' : 'display:none;'}flex-basis:100%;min-width:200px;">
+            <label>Request body</label>
+            <textarea name="edit-request-body" rows="3" placeholder='{"key": "value"}' style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:monospace;font-size:11px;padding:6px 8px;resize:vertical;outline:none;">${escHtml(m.request_body || '')}</textarea>
           </div>
           <div class="edit-field">
             <label>Keyword</label>
@@ -683,6 +727,9 @@ async function saveEdit(id) {
   const keyword           = form.querySelector('[name="edit-keyword"]').value.trim();
   const interval          = parseInt(form.querySelector('[name="edit-interval"]').value, 10);
   const latencyThreshold  = parseInt(form.querySelector('[name="edit-latency-threshold"]').value, 10) || 0;
+  const method            = form.querySelector('[name="edit-method"]').value;
+  const requestBodyEl     = form.querySelector('[name="edit-request-body"]');
+  const requestBody       = requestBodyEl ? requestBodyEl.value.trim() : '';
 
   errEl.textContent = '';
 
@@ -697,7 +744,7 @@ async function saveEdit(id) {
     const res = await fetch(`/api/monitors/${id}`, {
       method: 'PUT', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url, keyword, interval_seconds: interval, latency_threshold_ms: latencyThreshold }),
+      body: JSON.stringify({ name, url, keyword, interval_seconds: interval, latency_threshold_ms: latencyThreshold, method, request_body: requestBody }),
     });
     if (res.status === 401) { location.href = '/login'; return; }
     if (!res.ok) {
@@ -750,6 +797,8 @@ document.getElementById('addMonitorForm').addEventListener('submit', async e => 
         keyword:              form.keyword.value.trim(),
         interval_seconds:     parseInt(form.interval.value, 10),
         latency_threshold_ms: parseInt(form.latency_threshold.value, 10) || 0,
+        method:               form.method.value,
+        request_body:         (form.request_body ? form.request_body.value.trim() : ''),
       }),
     });
     if (res.status === 401) { location.href = '/login'; return; }
@@ -860,6 +909,8 @@ function renderDetail(m, results, outages) {
           <span class="status-badge ${cls}" style="font-size:11px;margin-right:8px;">${lbl}</span>${escHtml(m.name)}
         </div>
         <div class="detail-url">${escHtml(m.url)}</div>
+        ${m.method && m.method !== 'GET' ? `<div style="margin-top:5px;"><span style="display:inline-block;background:rgba(88,166,255,.15);color:var(--accent);border:1px solid var(--accent);border-radius:3px;font-size:10px;font-weight:700;padding:1px 6px;">${escHtml(m.method)}</span></div>` : ''}
+        ${m.request_body ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">📤 Body: <span style="font-family:monospace;color:var(--text);">${escHtml(m.request_body.length > 80 ? m.request_body.slice(0,80)+'…' : m.request_body)}</span></div>` : ''}
         ${m.keyword ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">🔍 Checking for: <span style="color:var(--text);font-weight:600;">"${escHtml(m.keyword)}"</span></div>` : ''}
         ${m.last_error && m.last_error.startsWith('keyword not found')
           ? `<div style="margin-top:4px;font-size:11px;color:var(--red);">⚠ ${escHtml(m.last_error)}</div>` : ''}
