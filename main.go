@@ -47,13 +47,13 @@ func main() {
 	hub := newHub()
 	go hub.run()
 
-	// Bind on all interfaces so Fly's proxy (and Docker port mapping) can reach
-	// the app; the simulator's self-probe still targets it via loopback.
 	bindAddr := fmt.Sprintf(":%d", cfg.Server.Port)
-	probeAddr := fmt.Sprintf("localhost:%d", cfg.Server.Port)
+
+	// Start the built-in Prometheus metrics simulator.
+	go newPromServer().Run(":9090")
 
 	sim := newSimulator(cfg)
-	metricsCh := sim.Run(probeAddr)
+	metricsCh := sim.Run("")
 
 	claude := newClaudeClient(cfg)
 	if claude == nil {
@@ -72,7 +72,6 @@ func main() {
 	alertEngine := newAlertEngine(hub, sim, claude, store, cfg)
 	go alertEngine.Run()
 
-	checker := newChecker(store, claude, mailer)
 	digest := newDigestRunner(store, claude, mailer)
 
 	// Fan-out simulator metrics to WebSocket clients.
@@ -97,7 +96,6 @@ func main() {
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
-	go checker.Run(sigCtx)
 	if mailer != nil {
 		go digest.Run(sigCtx)
 	}
