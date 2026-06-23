@@ -45,8 +45,9 @@ CREATE TABLE IF NOT EXISTS monitors (
   user_id          TEXT NOT NULL,
   name             TEXT NOT NULL,
   url              TEXT NOT NULL,
-  interval_seconds INTEGER DEFAULT 60,
-  enabled          INTEGER DEFAULT 1,
+  keyword          TEXT,
+  interval_seconds INTEGER NOT NULL DEFAULT 60,
+  enabled          INTEGER NOT NULL DEFAULT 1,
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS monitor_results (
   status_code INTEGER,
   latency_ms  INTEGER,
   error       TEXT,
-  checked_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  checked_at  DATETIME NOT NULL,
   FOREIGN KEY (monitor_id) REFERENCES monitors(id)
 );
 
@@ -78,6 +79,22 @@ CREATE TABLE IF NOT EXISTS password_resets (
   user_id    TEXT NOT NULL,
   expires_at DATETIME NOT NULL,
   used       INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS incidents (
+  id               TEXT PRIMARY KEY,
+  category         TEXT NOT NULL,
+  severity         TEXT NOT NULL,
+  cpu              REAL,
+  memory           REAL,
+  latency          REAL,
+  errors           REAL,
+  root_cause       TEXT,
+  immediate_action TEXT,
+  verification     TEXT,
+  prevention       TEXT,
+  fired_at         DATETIME NOT NULL,
+  resolved_at      DATETIME
 );`
 
 // Store persists alerts and AI responses to SQLite.
@@ -351,6 +368,148 @@ func (s *Store) ResolveAlert(id string, resolvedAt time.Time) {
 	if err != nil {
 		slog.Error("store.ResolveAlert failed", "id", id, "err", err)
 	}
+}
+
+// Incident is a persisted record of a fired alert plus AI analysis.
+type Incident struct {
+	ID              string           `json:"id"`
+	Category        IncidentCategory `json:"category"`
+	Severity        string           `json:"severity"`
+	CPU             float64          `json:"cpu"`
+	Memory          float64          `json:"memory"`
+	Latency         float64          `json:"latency"`
+	ErrorRate       float64          `json:"errors"`
+	RootCause       string           `json:"root_cause"`
+	ImmediateAction string           `json:"immediate_action"`
+	Verification    string           `json:"verification"`
+	Prevention      string           `json:"prevention"`
+	FiredAt         time.Time        `json:"fired_at"`
+	ResolvedAt      *time.Time       `json:"resolved_at,omitempty"`
+}
+
+// PastIncident is a lightweight view returned by FindSimilarIncidents for AI context.
+type PastIncident struct {
+	Category        IncidentCategory `json:"category"`
+	CPU             float64          `json:"cpu"`
+	Memory          float64          `json:"memory"`
+	Latency         float64          `json:"latency"`
+	ErrorRate       float64          `json:"errors"`
+	RootCause       string           `json:"root_cause"`
+	ImmediateAction string           `json:"immediate_action"`
+	FiredAt         string           `json:"fired_at"`
+	DurationMins    *int             `json:"duration_mins,omitempty"`
+}
+
+// SaveIncident inserts or updates an incident row. Safe to call twice (initial + AI update).
+func (s *Store) SaveIncident(inc Incident) error {
+	_, err := s.db.Exec(`
+		INSERT INTO incidents
+			(id, category, severity, cpu, memory, latency, errors,
+			 root_cause, immediate_action, verification, prevention, fired_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			root_cause       = excluded.root_cause,
+			immediate_action = excluded.immediate_action,
+			verification     = excluded.verification,
+			prevention       = excluded.prevention`,
+		inc.ID, string(inc.Category), inc.Severity,
+		inc.CPU, inc.Memory, inc.Latency, inc.ErrorRate,
+		inc.RootCause, inc.ImmediateAction, inc.Verification, inc.Prevention,
+		inc.FiredAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		slog.Error("store.SaveIncident failed", "id", inc.ID, "err", err)
+	}
+	return err
+}
+
+// FindSimilarIncidents returns up to limit past incidents of the same category, newest first.
+func (s *Store) FindSimilarIncidents(category IncidentCategory, limit int) ([]PastIncident, error) {
+	rows, err := s.db.Query(`
+		SELECT category, cpu, memory, latency, errors,
+		       COALESCE(root_cause,''), COALESCE(immediate_action,''),
+		       fired_at, resolved_at
+		FROM incidents
+		WHERE category = ?
+		ORDER BY fired_at DESC
+		LIMIT ?`, string(category), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PastIncident
+	for rows.Next() {
+		var p PastIncident
+		var cat string
+		var resolvedAt *string
+		if err := rows.Scan(&cat, &p.CPU, &p.Memory, &p.Latency, &p.ErrorRate,
+			&p.RootCause, &p.ImmediateAction, &p.FiredAt, &resolvedAt); err != nil {
+			continue
+		}
+		p.Category = IncidentCategory(cat)
+		if resolvedAt != nil {
+			firedT, _ := time.Parse(time.RFC3339, p.FiredAt)
+			resolvedT, _ := time.Parse(time.RFC3339, *resolvedAt)
+			if !firedT.IsZero() && !resolvedT.IsZero() {
+				mins := int(resolvedT.Sub(firedT).Minutes())
+				p.DurationMins = &mins
+			}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ResolveIncident sets resolved_at on an open incident row.
+func (s *Store) ResolveIncident(id string, resolvedAt time.Time) error {
+	_, err := s.db.Exec(
+		`UPDATE incidents SET resolved_at=? WHERE id=? AND resolved_at IS NULL`,
+		resolvedAt.UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		slog.Error("store.ResolveIncident failed", "id", id, "err", err)
+	}
+	return err
+}
+
+// GetRecentIncidents returns the most recent incidents (both open and resolved), newest first.
+func (s *Store) GetRecentIncidents(limit int) ([]Incident, error) {
+	rows, err := s.db.Query(`
+		SELECT id, category, severity, cpu, memory, latency, errors,
+		       COALESCE(root_cause,''), COALESCE(immediate_action,''),
+		       COALESCE(verification,''), COALESCE(prevention,''),
+		       fired_at, resolved_at
+		FROM incidents
+		ORDER BY fired_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Incident
+	for rows.Next() {
+		var inc Incident
+		var cat, firedAt string
+		var resolvedAt *string
+		if err := rows.Scan(&inc.ID, &cat, &inc.Severity,
+			&inc.CPU, &inc.Memory, &inc.Latency, &inc.ErrorRate,
+			&inc.RootCause, &inc.ImmediateAction, &inc.Verification, &inc.Prevention,
+			&firedAt, &resolvedAt); err != nil {
+			continue
+		}
+		inc.Category = IncidentCategory(cat)
+		inc.FiredAt, _ = time.Parse(time.RFC3339, firedAt)
+		if resolvedAt != nil {
+			t, _ := time.Parse(time.RFC3339, *resolvedAt)
+			if !t.IsZero() {
+				inc.ResolvedAt = &t
+			}
+		}
+		out = append(out, inc)
+	}
+	return out, rows.Err()
 }
 
 // UpdateAIResponse fills root_cause, remediation, and confidence for an existing alert.

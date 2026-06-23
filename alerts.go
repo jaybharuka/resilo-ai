@@ -14,6 +14,35 @@ const (
 	SeverityWarning  = "warning"
 )
 
+// IncidentCategory classifies the type of production incident.
+type IncidentCategory string
+
+const (
+	ResourceExhaustion   IncidentCategory = "ResourceExhaustion"
+	DeploymentRegression IncidentCategory = "DeploymentRegression"
+	DependencyFailure    IncidentCategory = "DependencyFailure"
+	NetworkIssue         IncidentCategory = "NetworkIssue"
+	Unknown              IncidentCategory = "Unknown"
+)
+
+// ClassifyIncident determines the incident category from the current metrics.
+// Pure logic, no AI, designed to run on every alert evaluation cycle.
+func ClassifyIncident(m Metrics) IncidentCategory {
+	if m.CPU > 85 || m.Memory > 85 {
+		return ResourceExhaustion
+	}
+	if m.Latency > 500 && m.CPU < 65 && m.Memory < 75 {
+		return NetworkIssue
+	}
+	if m.ErrorRate > 5 && m.CPU < 70 && m.Memory < 75 {
+		return DependencyFailure
+	}
+	if m.ErrorRate > 2 {
+		return DeploymentRegression
+	}
+	return Unknown
+}
+
 // Alert represents a fired threshold breach.
 type Alert struct {
 	ID        string  `json:"id"`
@@ -46,6 +75,7 @@ func nextAlertID() string {
 type activeAlert struct {
 	id         string
 	metric     string
+	category   IncidentCategory
 	firedAt    time.Time
 	resolvedAt time.Time
 }
@@ -165,6 +195,14 @@ func (ae *AlertEngine) GetAlertStats() map[string]interface{} {
 }
 
 func (ae *AlertEngine) evaluate(m Metrics) {
+	// Classify and fetch similar incidents outside the lock — these may do I/O.
+	category := ClassifyIncident(m)
+
+	var similar []PastIncident
+	if ae.store != nil {
+		similar, _ = ae.store.FindSimilarIncidents(category, 5)
+	}
+
 	ae.mu.Lock()
 	defer ae.mu.Unlock()
 
@@ -190,7 +228,6 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 		// --- Resolution path: metric dropped below warning ---
 		if c.value < c.warning {
 			if hasActive && active.resolvedAt.IsZero() {
-				// Open incident just cleared.
 				now := time.Now()
 				dur := int(now.Sub(active.firedAt).Seconds())
 				slog.Info("alert resolved",
@@ -200,6 +237,7 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 				)
 				if ae.store != nil {
 					ae.store.ResolveAlert(active.id, now)
+					ae.store.ResolveIncident(active.id, now)
 				}
 				ae.hub.broadcastJSON(WSMessage{
 					Type: "alert_resolved",
@@ -213,7 +251,6 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 				active.resolvedAt = now
 				ae.activeAlerts[c.key] = active
 			} else if hasActive && !active.resolvedAt.IsZero() && time.Since(active.resolvedAt) >= cooldown {
-				// Post-resolution cooldown expired — clean up entry.
 				delete(ae.activeAlerts, c.key)
 			}
 			continue
@@ -232,15 +269,12 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 
 		if hasActive {
 			if active.resolvedAt.IsZero() {
-				// Incident already open — do not re-fire.
-				continue
+				continue // incident already open — do not re-fire
 			}
 			if time.Since(active.resolvedAt) < cooldown {
-				// Still within post-resolution cooldown — do not re-fire.
-				continue
+				continue // within post-resolution cooldown
 			}
-			// Cooldown expired while metric is still elevated — treat as new incident.
-			delete(ae.activeAlerts, c.key)
+			delete(ae.activeAlerts, c.key) // cooldown expired, new incident
 		}
 
 		unit := "%"
@@ -261,9 +295,10 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 		}
 
 		ae.activeAlerts[c.key] = activeAlert{
-			id:      alert.ID,
-			metric:  c.metric,
-			firedAt: now,
+			id:       alert.ID,
+			metric:   c.metric,
+			category: category,
+			firedAt:  now,
 		}
 
 		if severity == SeverityCritical {
@@ -278,62 +313,112 @@ func (ae *AlertEngine) evaluate(m Metrics) {
 			"severity", alert.Severity,
 			"value", alert.Value,
 			"threshold", alert.Threshold,
+			"category", category,
+			"similar_past", len(similar),
 		)
+
 		if ae.store != nil {
 			ae.store.SaveAlert(alert)
+			ae.store.SaveIncident(Incident{
+				ID:       alert.ID,
+				Category: category,
+				Severity: severity,
+				CPU:      m.CPU,
+				Memory:   m.Memory,
+				Latency:  m.Latency,
+				ErrorRate: m.ErrorRate,
+				FiredAt:  now,
+			})
 		}
-		ae.hub.broadcastJSON(WSMessage{Type: "alert", Payload: alert})
 
-		go ae.analyzeWithClaude(alert, m)
+		ae.hub.broadcastJSON(WSMessage{
+			Type: "alert",
+			Payload: map[string]interface{}{
+				"id":           alert.ID,
+				"type":         alert.Type,
+				"metric":       alert.Metric,
+				"value":        alert.Value,
+				"threshold":    alert.Threshold,
+				"severity":     alert.Severity,
+				"message":      alert.Message,
+				"timestamp":    alert.Timestamp,
+				"category":     string(category),
+				"similar_count": len(similar),
+			},
+		})
+
+		go ae.analyzeWithClaude(alert, m, category, similar)
 	}
 }
 
-func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics) {
+func (ae *AlertEngine) analyzeWithClaude(alert Alert, m Metrics, category IncidentCategory, similar []PastIncident) {
 	if ae.claudeAPI == nil {
-		// Broadcast a fallback response when AI is disabled
-		fallback := map[string]interface{}{
-			"alert_id": alert.ID,
-			"model":    "disabled",
-			"root_cause": "AI analysis is disabled",
-			"remediation": "Check system metrics manually and investigate the alert condition",
-			"confidence": "none",
-			"timestamp": time.Now().UnixMilli(),
-		}
 		ae.hub.broadcastJSON(WSMessage{
-			Type:    "ai_response",
-			Payload: fallback,
+			Type: "ai_response",
+			Payload: map[string]interface{}{
+				"alert_id":         alert.ID,
+				"category":         string(category),
+				"similar_count":    len(similar),
+				"model":            "disabled",
+				"root_cause":       "AI analysis is disabled — no API key configured.",
+				"immediate_action": "Check system metrics manually.",
+				"verification":     "Monitor metrics until they return to baseline.",
+				"prevention":       "Configure ANTHROPIC_API_KEY or NVIDIA_API_KEY.",
+				"confidence":       "none",
+				"timestamp":        time.Now().UnixMilli(),
+			},
 		})
 		return
 	}
-	
-	resp, err := ae.claudeAPI.Analyze(alert, m)
+
+	resp, err := ae.claudeAPI.AnalyzeIncident(alert, m, category, similar)
 	if err != nil {
 		slog.Error("AI analysis failed", "alert_id", alert.ID, "err", err)
-		
-		// Broadcast a fallback response when AI fails
-		fallback := map[string]interface{}{
-			"alert_id": alert.ID,
-			"model":    ae.claudeAPI.getModel(),
-			"root_cause": fmt.Sprintf("AI analysis failed: %s", err.Error()),
-			"remediation": "Check system metrics manually and investigate the alert condition",
-			"confidence": "none",
-			"timestamp": time.Now().UnixMilli(),
-		}
 		ae.hub.broadcastJSON(WSMessage{
-			Type:    "ai_response",
-			Payload: fallback,
+			Type: "ai_response",
+			Payload: map[string]interface{}{
+				"alert_id":         alert.ID,
+				"category":         string(category),
+				"similar_count":    len(similar),
+				"model":            ae.claudeAPI.getModel(),
+				"root_cause":       fmt.Sprintf("AI analysis failed: %s", err.Error()),
+				"immediate_action": "Check system metrics manually.",
+				"verification":     "Monitor metrics until they return to baseline.",
+				"prevention":       "Investigate the AI provider configuration.",
+				"confidence":       "none",
+				"timestamp":        time.Now().UnixMilli(),
+			},
 		})
 		return
 	}
-	
-	slog.Info("AI analysis ready", "alert_id", alert.ID, "confidence", resp.Confidence)
+
+	slog.Info("AI analysis ready",
+		"alert_id", alert.ID,
+		"category", category,
+		"similar_count", len(similar),
+		"confidence", resp.Confidence,
+	)
+
 	if ae.store != nil {
 		ae.store.UpdateAIResponse(resp.AlertID, resp.RootCause, resp.Remediation, resp.Confidence)
+		// Update incident row with AI fields.
+		ae.store.SaveIncident(Incident{
+			ID:              alert.ID,
+			Category:        category,
+			Severity:        alert.Severity,
+			CPU:             m.CPU,
+			Memory:          m.Memory,
+			Latency:         m.Latency,
+			ErrorRate:       m.ErrorRate,
+			RootCause:       resp.RootCause,
+			ImmediateAction: resp.ImmediateAction,
+			Verification:    resp.Verification,
+			Prevention:      resp.Prevention,
+			FiredAt:         time.UnixMilli(alert.Timestamp),
+		})
 	}
-	ae.hub.broadcastJSON(WSMessage{
-		Type:    "ai_response",
-		Payload: resp,
-	})
+
+	ae.hub.broadcastJSON(WSMessage{Type: "ai_response", Payload: resp})
 }
 
 // Run evaluates metrics every 2 seconds.
