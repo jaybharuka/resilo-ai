@@ -187,6 +187,47 @@
     .monitor-card:hover .btn-delete { color: var(--muted); }
     .btn-delete:hover { color: var(--red) !important; }
 
+    .btn-edit {
+      position: absolute; top: 8px; right: 34px;
+      background: none; border: none; color: transparent;
+      cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 3px;
+    }
+    .monitor-card:hover .btn-edit { color: var(--muted); }
+    .btn-edit:hover { color: var(--accent) !important; }
+
+    /* ── Inline edit form inside a monitor card ── */
+    .edit-form {
+      display: none;
+      border-top: 1px solid var(--border);
+      margin-top: 10px;
+      padding-top: 12px;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .edit-form.open { display: flex; }
+    .edit-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+    .edit-field { display: flex; flex-direction: column; gap: 4px; }
+    .edit-field label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .edit-field input, .edit-field select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text); font-size: 12px; padding: 5px 9px; outline: none;
+    }
+    .edit-field input:focus, .edit-field select:focus { border-color: var(--accent); }
+    .edit-field input[name="edit-url"] { min-width: 200px; }
+    .edit-actions { display: flex; gap: 6px; align-items: center; }
+    .btn-save {
+      background: var(--accent); border: none; border-radius: 5px;
+      color: #0d1117; cursor: pointer; font-size: 11px; font-weight: 700; padding: 5px 14px;
+    }
+    .btn-save:hover { opacity: .88; }
+    .btn-save:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-cancel {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--muted); cursor: pointer; font-size: 11px; padding: 5px 10px;
+    }
+    .btn-cancel:hover { border-color: var(--muted); color: var(--text); }
+    .edit-error { font-size: 11px; color: var(--red); }
+
     .monitors-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 32px 0; }
 
     /* ── Right column: detail panel ── */
@@ -218,7 +259,7 @@
     /* ── Stats row ── */
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 10px;
       margin-bottom: 20px;
     }
@@ -230,6 +271,7 @@
     }
     .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
     .stat-value { font-size: 24px; font-weight: 700; }
+    .stat-sub   { font-size: 11px; margin-top: 3px; }
     .stat-value.good { color: var(--green); }
     .stat-value.warn { color: var(--yellow); }
     .stat-value.bad  { color: var(--red); }
@@ -249,6 +291,24 @@
     }
     .chart-title span { font-size: 11px; color: var(--text); text-transform: none; letter-spacing: 0; }
     svg.rt-chart { width: 100%; height: 140px; display: block; overflow: visible; }
+
+    /* ── Timing breakdown ── */
+    .timing-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 16px; margin-bottom: 20px;
+    }
+    .timing-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+    .timing-bar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg); }
+    .tseg { height: 100%; min-width: 2px; cursor: default; position: relative; }
+    .tseg-dns  { background: #58a6ff; }
+    .tseg-conn { background: #3fb950; }
+    .tseg-ttfb { background: #d29922; }
+    .tseg-rest { background: #484f58; }
+    .timing-legend {
+      display: flex; gap: 14px; font-size: 11px; color: var(--muted);
+      margin-top: 8px; flex-wrap: wrap; align-items: center;
+    }
+    .tleg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 
     /* ── Outages section ── */
     .outages-section { }
@@ -340,6 +400,10 @@
         <input type="url" name="url" placeholder="https://example.com" required />
       </div>
       <div class="form-field">
+        <label>Keyword <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+        <input type="text" name="keyword" placeholder="e.g. healthy, Welcome" style="min-width:160px;" />
+      </div>
+      <div class="form-field">
         <label>Interval</label>
         <select name="interval">
           <option value="60">Every 1 min</option>
@@ -384,6 +448,12 @@ function relTime(iso) {
   if (s < 60)   return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s/60)}m ago`;
   return `${Math.floor(s/3600)}h ago`;
+}
+
+function fmtInterval(s) {
+  if (s < 60)   return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  return `${Math.floor(s / 3600)}h`;
 }
 
 function fmtDur(from, to) {
@@ -508,10 +578,97 @@ function renderMonitors(monitors) {
         <span>🕐 ${relTime(m.last_checked_at)}</span>
         <span>↻ ${interval}</span>
       </div>
+      <button class="btn-edit"   title="Edit"   onclick="event.stopPropagation();openEdit('${m.id}')">✏</button>
       <button class="btn-delete" title="Delete" onclick="event.stopPropagation();deleteMonitor('${m.id}')">✕</button>
+      <div class="edit-form" id="edit-form-${m.id}" onclick="event.stopPropagation()">
+        <div class="edit-row">
+          <div class="edit-field">
+            <label>Name</label>
+            <input name="edit-name" value="${escHtml(m.name)}" maxlength="50" style="min-width:120px;" />
+          </div>
+          <div class="edit-field">
+            <label>URL</label>
+            <input name="edit-url" value="${escHtml(m.url)}" type="url" />
+          </div>
+          <div class="edit-field">
+            <label>Keyword</label>
+            <input name="edit-keyword" value="${escHtml(m.keyword || '')}" placeholder="optional" style="min-width:110px;" />
+          </div>
+          <div class="edit-field">
+            <label>Interval</label>
+            <select name="edit-interval">
+              <option value="60"   ${m.interval_seconds===60   ? 'selected' : ''}>Every 1 min</option>
+              <option value="300"  ${m.interval_seconds===300  ? 'selected' : ''}>Every 5 min</option>
+              <option value="600"  ${m.interval_seconds===600  ? 'selected' : ''}>Every 10 min</option>
+              <option value="1800" ${m.interval_seconds===1800 ? 'selected' : ''}>Every 30 min</option>
+            </select>
+          </div>
+        </div>
+        <div class="edit-actions">
+          <button class="btn-save" onclick="event.stopPropagation();saveEdit('${m.id}')">Save</button>
+          <button class="btn-cancel" onclick="event.stopPropagation();cancelEdit('${m.id}')">Cancel</button>
+          <span class="edit-error" id="edit-err-${m.id}"></span>
+        </div>
+      </div>
     `;
     monitorGrid.appendChild(card);
   });
+}
+
+// ── Inline edit ─────────────────────────────────────────────────
+function openEdit(id) {
+  // Close any other open edit forms first.
+  document.querySelectorAll('.edit-form.open').forEach(f => {
+    if (f.id !== `edit-form-${id}`) f.classList.remove('open');
+  });
+  const form = document.getElementById(`edit-form-${id}`);
+  if (!form) return;
+  form.classList.toggle('open');
+}
+
+function cancelEdit(id) {
+  const form = document.getElementById(`edit-form-${id}`);
+  if (form) form.classList.remove('open');
+}
+
+async function saveEdit(id) {
+  const form  = document.getElementById(`edit-form-${id}`);
+  const errEl = document.getElementById(`edit-err-${id}`);
+  const btn   = form.querySelector('.btn-save');
+  if (!form) return;
+
+  const name     = form.querySelector('[name="edit-name"]').value.trim();
+  const url      = form.querySelector('[name="edit-url"]').value.trim();
+  const keyword  = form.querySelector('[name="edit-keyword"]').value.trim();
+  const interval = parseInt(form.querySelector('[name="edit-interval"]').value, 10);
+
+  errEl.textContent = '';
+
+  // Client-side validation mirrors server.
+  if (!name || name.length > 50) { errEl.textContent = 'Name must be 1–50 chars.'; return; }
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    errEl.textContent = 'URL must start with http:// or https://'; return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch(`/api/monitors/${id}`, {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url, keyword, interval_seconds: interval }),
+    });
+    if (res.status === 401) { location.href = '/login'; return; }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.error || 'Save failed.';
+      return;
+    }
+    form.classList.remove('open');
+    await fetchMonitors();
+    // Re-open detail panel for this monitor if it was selected.
+    if (selectedId === id) refreshDetailStats();
+  } catch { errEl.textContent = 'Network error.'; }
+  finally { btn.disabled = false; btn.textContent = 'Save'; }
 }
 
 async function fetchMonitors() {
@@ -546,8 +703,9 @@ document.getElementById('addMonitorForm').addEventListener('submit', async e => 
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: form.name.value.trim(),
-        url:  form.url.value.trim(),
+        name:             form.name.value.trim(),
+        url:              form.url.value.trim(),
+        keyword:          form.keyword.value.trim(),
         interval_seconds: parseInt(form.interval.value, 10),
       }),
     });
@@ -585,7 +743,7 @@ async function selectMonitor(id) {
 
   // Parallel fetch: results + outages
   const [resultsRes, outagesRes] = await Promise.all([
-    fetch(`/api/monitors/${id}/results?limit=50`, { credentials: 'include' }),
+    fetch(`/api/monitors/${id}/results?limit=100`, { credentials: 'include' }),
     fetch(`/api/monitors/${id}/outages`,          { credentials: 'include' }),
   ]);
 
@@ -600,7 +758,7 @@ async function refreshDetailStats() {
   const m = monitorsData.find(x => x.id === selectedId);
   if (!m) return;
   const [resultsRes, outagesRes] = await Promise.all([
-    fetch(`/api/monitors/${selectedId}/results?limit=50`, { credentials: 'include' }),
+    fetch(`/api/monitors/${selectedId}/results?limit=100`, { credentials: 'include' }),
     fetch(`/api/monitors/${selectedId}/outages`,          { credentials: 'include' }),
   ]);
   const results = resultsRes.ok ? (await resultsRes.json()) : [];
@@ -630,6 +788,21 @@ function renderDetail(m, results, outages) {
 
   const uptimeClass = uptimePct === '—' ? '' : +uptimePct >= 99 ? 'good' : +uptimePct >= 95 ? 'warn' : 'bad';
 
+  // SSL expiry card — only for HTTPS monitors that have cert data.
+  let sslCardHtml = '';
+  if (m.ssl_expiry) {
+    const exp      = new Date(m.ssl_expiry);
+    const daysLeft = Math.floor((exp - Date.now()) / 86400000);
+    const sslColor = daysLeft > 30 ? 'var(--green)' : daysLeft > 7 ? 'var(--yellow)' : 'var(--red)';
+    const sslSub   = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+    sslCardHtml = `
+      <div class="stat-card">
+        <div class="stat-label">SSL expires</div>
+        <div class="stat-value" style="font-size:15px;color:${sslColor};">${exp.toLocaleDateString()}</div>
+        <div class="stat-sub" style="color:${sslColor};">${sslSub}</div>
+      </div>`;
+  }
+
   detailPanel.innerHTML = `
     <div class="detail-header">
       <div>
@@ -637,6 +810,9 @@ function renderDetail(m, results, outages) {
           <span class="status-badge ${cls}" style="font-size:11px;margin-right:8px;">${lbl}</span>${escHtml(m.name)}
         </div>
         <div class="detail-url">${escHtml(m.url)}</div>
+        ${m.keyword ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);">🔍 Checking for: <span style="color:var(--text);font-weight:600;">"${escHtml(m.keyword)}"</span></div>` : ''}
+        ${m.last_error && m.last_error.startsWith('keyword not found')
+          ? `<div style="margin-top:4px;font-size:11px;color:var(--red);">⚠ ${escHtml(m.last_error)}</div>` : ''}
       </div>
       <button class="btn-close" onclick="closeDetail()">✕</button>
     </div>
@@ -654,14 +830,20 @@ function renderDetail(m, results, outages) {
         <div class="stat-label">Avg response</div>
         <div class="stat-value">${avgLatency != null ? avgLatency + 'ms' : '—'}</div>
       </div>
+      ${sslCardHtml}
     </div>
+
+    ${buildTimingBar(results)}
 
     <div class="chart-section">
       <div class="chart-title">
-        Response time — last ${results.length} checks
+        Response time — last ${results.length} check${results.length === 1 ? '' : 's'}
         <span>${relTime(m.last_checked_at)}</span>
       </div>
       ${buildChart(results)}
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;">
+        Checks run every ${fmtInterval(m.interval_seconds)} — chart fills over time.
+      </div>
     </div>
 
     <div class="outages-section">
@@ -669,6 +851,42 @@ function renderDetail(m, results, outages) {
       ${buildOutages(outages.slice(0, 5))}
     </div>
   `;
+}
+
+// ── Timing breakdown bar ─────────────────────────────────────────
+function buildTimingBar(results) {
+  const timed = results.filter(r => r.dns_ms != null && r.latency_ms != null && r.latency_ms > 0);
+  if (!timed.length) return '';
+
+  const avg = fn => Math.round(timed.reduce((s, r) => s + fn(r), 0) / timed.length);
+  const avgDns  = avg(r => r.dns_ms  ?? 0);
+  const avgConn = avg(r => r.connect_ms ?? 0);
+  const avgTtfb = avg(r => r.ttfb_ms ?? 0);
+  const avgLat  = avg(r => r.latency_ms);
+  const avgRest = Math.max(0, avgLat - avgDns - avgConn - avgTtfb);
+  const total   = avgDns + avgConn + avgTtfb + avgRest || 1;
+  const pct     = v => ((v / total) * 100).toFixed(1);
+
+  const seg = (cls, val, label) => val > 0
+    ? `<div class="tseg ${cls}" style="width:${pct(val)}%;" title="${label}: ${val}ms"></div>` : '';
+
+  return `
+    <div class="timing-section">
+      <div class="timing-label">Avg timing breakdown — ${timed.length} sampled check${timed.length === 1 ? '' : 's'}</div>
+      <div class="timing-bar">
+        ${seg('tseg-dns',  avgDns,  'DNS')}
+        ${seg('tseg-conn', avgConn, 'TCP connect')}
+        ${seg('tseg-ttfb', avgTtfb, 'TTFB')}
+        ${seg('tseg-rest', avgRest, 'Body transfer')}
+      </div>
+      <div class="timing-legend">
+        <span><span class="tleg-dot tseg-dns"></span>DNS ${avgDns}ms</span>
+        <span><span class="tleg-dot tseg-conn"></span>Connect ${avgConn}ms</span>
+        <span><span class="tleg-dot tseg-ttfb"></span>TTFB ${avgTtfb}ms</span>
+        <span><span class="tleg-dot tseg-rest"></span>Transfer ${avgRest}ms</span>
+        <span style="margin-left:auto;color:var(--muted);">Total avg ${avgLat}ms</span>
+      </div>
+    </div>`;
 }
 
 // ── SVG line chart ───────────────────────────────────────────────

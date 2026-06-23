@@ -120,6 +120,47 @@ func (m *Mailer) SendRecoveryAlert(to, monitorName, url string, downDuration tim
 	return m.send(to, subject, body)
 }
 
+// SendSSLExpiryAlert notifies a user that a monitor's TLS cert is near expiry.
+func (m *Mailer) SendSSLExpiryAlert(to, monitorName, url string, expiresAt time.Time, critical bool) error {
+	daysLeft := int(time.Until(expiresAt).Hours() / 24)
+	emoji := "⚠️"
+	level := "Warning"
+	headerColor := "#d29922"
+	if critical {
+		emoji = "🚨"
+		level = "Critical"
+		headerColor = "#f85149"
+	}
+	subject := fmt.Sprintf("%s SSL Certificate Expiring: %s", emoji, monitorName)
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:20px;">
+<div style="max-width:540px;margin:0 auto;">
+  <div style="background:%s;padding:18px 24px;border-radius:8px 8px 0 0;">
+    <h1 style="margin:0;font-size:18px;color:#fff;">%s SSL Certificate %s</h1>
+  </div>
+  <div style="background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
+    <table style="width:100%%;border-collapse:collapse;margin-bottom:20px;">
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;width:90px;">Monitor</td><td style="font-weight:700;">%s</td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">URL</td><td><a href="%s" style="color:#58a6ff;text-decoration:none;">%s</a></td></tr>
+      <tr><td style="color:#8b949e;padding:5px 0;font-size:12px;">Expires</td><td style="color:%s;font-weight:700;">%s (%d day(s) left)</td></tr>
+    </table>
+    <div style="background:#21262d;border-radius:6px;padding:12px 14px;font-size:13px;line-height:1.6;">
+      Renew the TLS certificate for <strong>%s</strong> before it expires to prevent connection errors.
+    </div>
+    <p style="margin-top:24px;font-size:11px;color:#8b949e;">Sent by <a href="https://resilo-ai.fly.dev" style="color:#58a6ff;">Resilo AI</a></p>
+  </div>
+</div>
+</body></html>`,
+		headerColor, emoji, level,
+		htmlEscape(monitorName), url, htmlEscape(url),
+		headerColor, expiresAt.UTC().Format("2006-01-02"), daysLeft,
+		htmlEscape(url),
+	)
+	return m.send(to, subject, body)
+}
+
 func htmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

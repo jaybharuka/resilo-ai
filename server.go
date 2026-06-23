@@ -640,6 +640,7 @@ func newServeMux(hub *Hub, sim *Simulator, ae *AlertEngine, store *Store, startT
 	// Monitor routes — session-cookie auth.
 	mux.HandleFunc("GET /api/monitors", monitorsListHandler(store))
 	mux.HandleFunc("POST /api/monitors", monitorsCreateHandler(store))
+	mux.HandleFunc("PUT /api/monitors/{id}", monitorsUpdateHandler(store))
 	mux.HandleFunc("DELETE /api/monitors/{id}", monitorsDeleteHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/results", monitorsResultsHandler(store))
 	mux.HandleFunc("GET /api/monitors/{id}/outages", monitorsOutagesHandler(store))
@@ -705,6 +706,7 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 		var req struct {
 			Name            string `json:"name"`
 			URL             string `json:"url"`
+			Keyword         string `json:"keyword"`
 			IntervalSeconds int    `json:"interval_seconds"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -718,7 +720,7 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 		if req.IntervalSeconds <= 0 {
 			req.IntervalSeconds = 60
 		}
-		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.IntervalSeconds)
+		m, err := store.CreateMonitor(user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds)
 		if err != nil {
 			slog.Error("CreateMonitor failed", "err", err)
 			http.Error(w, "db error", http.StatusInternalServerError)
@@ -727,6 +729,56 @@ func monitorsCreateHandler(store *Store) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(m)
+	}
+}
+
+func monitorsUpdateHandler(store *Store) http.HandlerFunc {
+	validIntervals := map[int]bool{60: true, 300: true, 600: true, 1800: true}
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(store, w, r)
+		if !ok {
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Name            string `json:"name"`
+			URL             string `json:"url"`
+			Keyword         string `json:"keyword"`
+			IntervalSeconds int    `json:"interval_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if l := len(req.Name); l == 0 || l > 50 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "name must be 1–50 characters"})
+			return
+		}
+		if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "URL must start with http:// or https://"})
+			return
+		}
+		if !validIntervals[req.IntervalSeconds] {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "interval must be 60, 300, 600, or 1800 seconds"})
+			return
+		}
+		if err := store.UpdateMonitor(id, user.ID, req.Name, req.URL, req.Keyword, req.IntervalSeconds); err != nil {
+			slog.Error("UpdateMonitor failed", "err", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
 	}
 }
 

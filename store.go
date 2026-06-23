@@ -152,6 +152,74 @@ func Open(path string) (*Store, error) {
 		slog.Info("store: migrated users.slug column")
 	}
 
+	// Migration: add ssl_expiry column to monitors if it doesn't exist.
+	var hasSSLExpiry bool
+	monRows, err2 := db.Query(`PRAGMA table_info(monitors)`)
+	if err2 == nil {
+		for monRows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if monRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil && name == "ssl_expiry" {
+				hasSSLExpiry = true
+			}
+		}
+		monRows.Close()
+	}
+	if !hasSSLExpiry {
+		if _, err := db.Exec(`ALTER TABLE monitors ADD COLUMN ssl_expiry DATETIME`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate monitors.ssl_expiry: %w", err)
+		}
+		slog.Info("store: migrated monitors.ssl_expiry column")
+	}
+
+	// Migration: add keyword column to monitors if it doesn't exist.
+	var hasKeyword bool
+	kwRows, err3 := db.Query(`PRAGMA table_info(monitors)`)
+	if err3 == nil {
+		for kwRows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if kwRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil && name == "keyword" {
+				hasKeyword = true
+			}
+		}
+		kwRows.Close()
+	}
+	if !hasKeyword {
+		if _, err := db.Exec(`ALTER TABLE monitors ADD COLUMN keyword TEXT`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate monitors.keyword: %w", err)
+		}
+		slog.Info("store: migrated monitors.keyword column")
+	}
+
+	// Migration: add dns_ms / connect_ms / ttfb_ms columns to monitor_results.
+	mrCols := map[string]bool{}
+	mrRows, _ := db.Query(`PRAGMA table_info(monitor_results)`)
+	if mrRows != nil {
+		for mrRows.Next() {
+			var cid, notNull, pk int
+			var name, colType string
+			var dflt interface{}
+			if mrRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk) == nil {
+				mrCols[name] = true
+			}
+		}
+		mrRows.Close()
+	}
+	for _, col := range []string{"dns_ms", "connect_ms", "ttfb_ms"} {
+		if !mrCols[col] {
+			if _, err := db.Exec(`ALTER TABLE monitor_results ADD COLUMN ` + col + ` INTEGER`); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate monitor_results.%s: %w", col, err)
+			}
+			slog.Info("store: migrated monitor_results column", "col", col)
+		}
+	}
+
 	slog.Info("store opened", "path", path, "max_open_conns", 10, "max_idle_conns", 5)
 	return &Store{db: db}, nil
 }
@@ -443,6 +511,7 @@ type Monitor struct {
 	UserID          string  `json:"user_id"`
 	Name            string  `json:"name"`
 	URL             string  `json:"url"`
+	Keyword         string  `json:"keyword"`
 	IntervalSeconds int     `json:"interval_seconds"`
 	Enabled         bool    `json:"enabled"`
 	CreatedAt       string  `json:"created_at"`
@@ -450,6 +519,7 @@ type Monitor struct {
 	LastLatencyMs   *int    `json:"last_latency_ms"`
 	LastError       *string `json:"last_error"`
 	LastCheckedAt   *string `json:"last_checked_at"`
+	SSLExpiry       *string `json:"ssl_expiry"`
 }
 
 // MonitorResult is one check outcome for a monitor.
@@ -458,29 +528,37 @@ type MonitorResult struct {
 	MonitorID  string  `json:"monitor_id"`
 	StatusCode *int    `json:"status_code"`
 	LatencyMs  *int    `json:"latency_ms"`
+	DnsMs      *int    `json:"dns_ms"`
+	ConnectMs  *int    `json:"connect_ms"`
+	TtfbMs     *int    `json:"ttfb_ms"`
 	Error      *string `json:"error"`
 	CheckedAt  string  `json:"checked_at"`
 }
 
 // CreateMonitor inserts a new monitor row.
-func (s *Store) CreateMonitor(userID, name, url string, intervalSeconds int) (Monitor, error) {
+func (s *Store) CreateMonitor(userID, name, url, keyword string, intervalSeconds int) (Monitor, error) {
 	id := GenerateToken()[:16]
 	now := time.Now().UTC().Format(time.RFC3339)
+	var kwVal interface{}
+	if keyword != "" {
+		kwVal = keyword
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO monitors (id, user_id, name, url, interval_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, userID, name, url, intervalSeconds, now,
+		`INSERT INTO monitors (id, user_id, name, url, keyword, interval_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, name, url, kwVal, intervalSeconds, now,
 	)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
-	return Monitor{ID: id, UserID: userID, Name: name, URL: url, IntervalSeconds: intervalSeconds, Enabled: true, CreatedAt: now}, nil
+	return Monitor{ID: id, UserID: userID, Name: name, URL: url, Keyword: keyword, IntervalSeconds: intervalSeconds, Enabled: true, CreatedAt: now}, nil
 }
 
 // GetMonitorsByUser returns all monitors for a user with the latest result joined.
 func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT m.id, m.user_id, m.name, m.url, m.interval_seconds, m.enabled, m.created_at,
-		       r.status_code, r.latency_ms, r.error, r.checked_at
+		SELECT m.id, m.user_id, m.name, m.url, COALESCE(m.keyword,''), m.interval_seconds, m.enabled, m.created_at,
+		       r.status_code, r.latency_ms, r.error, r.checked_at,
+		       m.ssl_expiry
 		FROM monitors m
 		LEFT JOIN monitor_results r ON r.id = (
 		    SELECT id FROM monitor_results WHERE monitor_id = m.id ORDER BY checked_at DESC LIMIT 1
@@ -497,8 +575,9 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 		var m Monitor
 		var enabled int
 		if err := rows.Scan(
-			&m.ID, &m.UserID, &m.Name, &m.URL, &m.IntervalSeconds, &enabled, &m.CreatedAt,
+			&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds, &enabled, &m.CreatedAt,
 			&m.LastStatus, &m.LastLatencyMs, &m.LastError, &m.LastCheckedAt,
+			&m.SSLExpiry,
 		); err != nil {
 			return nil, err
 		}
@@ -511,7 +590,7 @@ func (s *Store) GetMonitorsByUser(userID string) ([]Monitor, error) {
 // GetAllEnabledMonitors returns all enabled monitors across all users (used by checker).
 func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, name, url, interval_seconds, enabled, created_at
+		SELECT id, user_id, name, url, COALESCE(keyword,''), interval_seconds, enabled, created_at
 		FROM monitors WHERE enabled = 1`)
 	if err != nil {
 		return nil, err
@@ -522,7 +601,7 @@ func (s *Store) GetAllEnabledMonitors() ([]Monitor, error) {
 	for rows.Next() {
 		var m Monitor
 		var enabled int
-		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.URL, &m.IntervalSeconds, &enabled, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Name, &m.URL, &m.Keyword, &m.IntervalSeconds, &enabled, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		m.Enabled = enabled == 1
@@ -537,17 +616,55 @@ func (s *Store) DeleteMonitor(id, userID string) error {
 	return err
 }
 
+// UpdateMonitor updates editable fields on a monitor owned by the given user.
+func (s *Store) UpdateMonitor(id, userID, name, url, keyword string, intervalSeconds int) error {
+	var kwVal interface{}
+	if keyword != "" {
+		kwVal = keyword
+	}
+	res, err := s.db.Exec(
+		`UPDATE monitors SET name = ?, url = ?, keyword = ?, interval_seconds = ? WHERE id = ? AND user_id = ?`,
+		name, url, kwVal, intervalSeconds, id, userID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("monitor not found or not owned by user")
+	}
+	return nil
+}
+
+// UpdateSSLExpiry sets the ssl_expiry timestamp on a monitor.
+func (s *Store) UpdateSSLExpiry(monitorID string, expiry *time.Time) error {
+	var val interface{}
+	if expiry != nil {
+		val = expiry.UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.Exec(`UPDATE monitors SET ssl_expiry = ? WHERE id = ?`, val, monitorID)
+	return err
+}
+
 // SaveResult inserts a new check result for a monitor.
-func (s *Store) SaveResult(monitorID string, statusCode, latencyMs int, errStr string) error {
+// Pass -1 for dnsMs/connectMs/ttfbMs when timing data is unavailable (e.g. connection error).
+func (s *Store) SaveResult(monitorID string, statusCode, latencyMs, dnsMs, connectMs, ttfbMs int, errStr string) error {
 	id := GenerateToken()[:16]
 	now := time.Now().UTC().Format(time.RFC3339)
+	nullable := func(v int) interface{} {
+		if v < 0 {
+			return nil
+		}
+		return v
+	}
 	var errVal interface{}
 	if errStr != "" {
 		errVal = errStr
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO monitor_results (id, monitor_id, status_code, latency_ms, error, checked_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, monitorID, statusCode, latencyMs, errVal, now,
+		`INSERT INTO monitor_results (id, monitor_id, status_code, latency_ms, dns_ms, connect_ms, ttfb_ms, error, checked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, monitorID, statusCode, latencyMs, nullable(dnsMs), nullable(connectMs), nullable(ttfbMs), errVal, now,
 	)
 	return err
 }
@@ -555,7 +672,7 @@ func (s *Store) SaveResult(monitorID string, statusCode, latencyMs int, errStr s
 // GetRecentResults returns the most recent results for a monitor.
 func (s *Store) GetRecentResults(monitorID string, limit int) ([]MonitorResult, error) {
 	rows, err := s.db.Query(`
-		SELECT id, monitor_id, status_code, latency_ms, error, checked_at
+		SELECT id, monitor_id, status_code, latency_ms, dns_ms, connect_ms, ttfb_ms, error, checked_at
 		FROM monitor_results WHERE monitor_id = ?
 		ORDER BY checked_at DESC LIMIT ?`, monitorID, limit)
 	if err != nil {
@@ -566,7 +683,7 @@ func (s *Store) GetRecentResults(monitorID string, limit int) ([]MonitorResult, 
 	var result []MonitorResult
 	for rows.Next() {
 		var r MonitorResult
-		if err := rows.Scan(&r.ID, &r.MonitorID, &r.StatusCode, &r.LatencyMs, &r.Error, &r.CheckedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.MonitorID, &r.StatusCode, &r.LatencyMs, &r.DnsMs, &r.ConnectMs, &r.TtfbMs, &r.Error, &r.CheckedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
