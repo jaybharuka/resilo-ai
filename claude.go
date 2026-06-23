@@ -23,14 +23,19 @@ type ClaudeClient struct {
 	httpClient *http.Client
 }
 
-// AIResponse is broadcast to WebSocket clients.
+// AIResponse is broadcast to WebSocket clients and used for incident persistence.
 type AIResponse struct {
-	AlertID     string `json:"alert_id"`
-	Model       string `json:"model"`
-	RootCause   string `json:"root_cause"`
-	Remediation string `json:"remediation"`
-	Confidence  string `json:"confidence"`
-	Timestamp   int64  `json:"timestamp"`
+	AlertID         string           `json:"alert_id"`
+	Category        IncidentCategory `json:"category"`
+	SimilarCount    int              `json:"similar_count"`
+	Model           string           `json:"model"`
+	RootCause       string           `json:"root_cause"`
+	ImmediateAction string           `json:"immediate_action"`
+	Verification    string           `json:"verification"`
+	Prevention      string           `json:"prevention"`
+	Remediation     string           `json:"remediation"` // backward compat alias for ImmediateAction
+	Confidence      string           `json:"confidence"`
+	Timestamp       int64            `json:"timestamp"`
 }
 
 func newClaudeClient(cfg *Config) *ClaudeClient {
@@ -87,39 +92,62 @@ type anthropicResponse struct {
 	} `json:"content"`
 }
 
-type analysisJSON struct {
-	RootCause   string `json:"root_cause"`
-	Remediation string `json:"remediation"`
-	Confidence  string `json:"confidence"`
+type incidentAnalysisJSON struct {
+	RootCause       string `json:"root_cause"`
+	ImmediateAction string `json:"immediate_action"`
+	Verification    string `json:"verification"`
+	Prevention      string `json:"prevention"`
+	Confidence      string `json:"confidence"`
 }
 
-func (c *ClaudeClient) Analyze(alert Alert, m Metrics) (*AIResponse, error) {
-	prompt := fmt.Sprintf(`You are an expert SRE/DevOps AI assistant analyzing a production incident.
+// AnalyzeIncident calls the AI with full category context and past-incident memory.
+func (c *ClaudeClient) AnalyzeIncident(alert Alert, m Metrics, category IncidentCategory, similar []PastIncident) (*AIResponse, error) {
+	// Build the similar-incidents section.
+	var pastSection string
+	if len(similar) == 0 {
+		pastSection = "No similar past incidents on record yet."
+	} else {
+		var sb strings.Builder
+		for i, p := range similar {
+			dur := ""
+			if p.DurationMins != nil {
+				dur = fmt.Sprintf(", resolved in %dm", *p.DurationMins)
+			}
+			fmt.Fprintf(&sb, "  %d. [%s] CPU:%.0f%% Mem:%.0f%% Lat:%.0fms Err:%.2f%%%s\n",
+				i+1, p.FiredAt, p.CPU, p.Memory, p.Latency, p.ErrorRate, dur)
+			if p.RootCause != "" {
+				fmt.Fprintf(&sb, "     Root cause: %s\n", p.RootCause)
+			}
+			if p.ImmediateAction != "" {
+				fmt.Fprintf(&sb, "     Fixed with: %s\n", p.ImmediateAction)
+			}
+		}
+		pastSection = sb.String()
+	}
 
-INCIDENT ALERT:
-- Alert ID: %s
-- Metric: %s
-- Current Value: %.2f
-- Threshold: %.0f
-- Severity: %s
-- Message: %s
+	prompt := fmt.Sprintf(`You are an expert SRE on-call assistant. Classify and diagnose this production incident.
 
-CURRENT SYSTEM METRICS:
-- CPU Usage: %.2f%%
-- Memory Usage: %.2f%%
-- Latency: %.2fms
-- Error Rate: %.2f%%
+Category detected: %s
+Current metrics: CPU %.1f%%, Memory %.1f%%, Latency %.0fms, Error rate %.2f%%
+Service: prod-api (Go HTTP service, PostgreSQL backend, deployed on Fly.io)
+Alert: %s (severity: %s)
 
-Provide a concise JSON response with exactly these fields:
+Similar past incidents:
+%s
+Provide a JSON response with exactly these fields:
 {
-  "root_cause": "2-3 sentence explanation of the most likely root cause",
-  "remediation": "3-5 numbered action steps to resolve the issue",
+  "root_cause": "one sentence, specific to this category and these metrics",
+  "immediate_action": "exact command or step to take right now",
+  "verification": "how to confirm the fix worked",
+  "prevention": "one long-term fix to prevent recurrence",
   "confidence": "high|medium|low"
 }
 
-IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown code fences or backticks. No text before or after the JSON.`,
-		alert.ID, alert.Metric, alert.Value, alert.Threshold, alert.Severity, alert.Message,
+IMPORTANT: Respond with ONLY the raw JSON. No markdown fences, no text before or after.`,
+		category,
 		m.CPU, m.Memory, m.Latency, m.ErrorRate,
+		alert.Message, alert.Severity,
+		pastSection,
 	)
 
 	var text string
@@ -133,7 +161,6 @@ IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown cod
 		return nil, err
 	}
 
-	// Strip markdown code fences if the model wrapped the JSON
 	clean := strings.TrimSpace(text)
 	if idx := strings.Index(clean, "{"); idx > 0 {
 		clean = clean[idx:]
@@ -142,21 +169,25 @@ IMPORTANT: Respond with ONLY the raw JSON object. Do NOT wrap it in markdown cod
 		clean = clean[:idx+1]
 	}
 
-	var analysis analysisJSON
-	if err := json.Unmarshal([]byte(clean), &analysis); err != nil {
-		// Fallback: display raw text as root cause
+	var analysis incidentAnalysisJSON
+	if jsonErr := json.Unmarshal([]byte(clean), &analysis); jsonErr != nil {
 		analysis.RootCause = text
-		analysis.Remediation = "See root cause for details."
+		analysis.ImmediateAction = "Investigate system metrics manually."
 		analysis.Confidence = "low"
 	}
 
 	return &AIResponse{
-		AlertID:     alert.ID,
-		Model:       c.model,
-		RootCause:   analysis.RootCause,
-		Remediation: analysis.Remediation,
-		Confidence:  analysis.Confidence,
-		Timestamp:   time.Now().UnixMilli(),
+		AlertID:         alert.ID,
+		Category:        category,
+		SimilarCount:    len(similar),
+		Model:           c.model,
+		RootCause:       analysis.RootCause,
+		ImmediateAction: analysis.ImmediateAction,
+		Verification:    analysis.Verification,
+		Prevention:      analysis.Prevention,
+		Remediation:     analysis.ImmediateAction, // backward compat alias
+		Confidence:      analysis.Confidence,
+		Timestamp:       time.Now().UnixMilli(),
 	}, nil
 }
 
